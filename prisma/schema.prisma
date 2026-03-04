@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Agency {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  themeColor String   @default("#0066cc")
+  createdAt  DateTime @default(now())
+
+  users      User[]
+  products   Product[]
+  orders     Order[]
+  payments   Payment[]
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  agencyId  Int
+  name      String
+  email     String
+  password  String
+  role      String   @default("CUSTOMER") // ADMIN, EMPLOYEE, CUSTOMER
+  phone     String?
+  address   String?
+  createdAt DateTime @default(now())
+
+  agency           Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  ordersAsCustomer Order[]   @relation("CustomerOrders")
+  ordersAsEmployee Order[]   @relation("EmployeeOrders")
+  payments         Payment[]
+
+  @@unique([email, agencyId])
+}
+
+model Product {
+  id          Int         @id @default(autoincrement())
+  agencyId    Int
+  name        String
+  description String?
+  price       Float
+  stock       Int         @default(0)
+  unit        String      @default("pcs")
+  category    String?
+  createdAt   DateTime    @default(now())
+
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  orderItems  OrderItem[]
+}
+
+model Order {
+  id          Int         @id @default(autoincrement())
+  agencyId    Int
+  customerId  Int
+  employeeId  Int?
+  status      String      @default("PENDING") // PENDING, CONFIRMED, DELIVERED, CANCELLED
+  totalAmount Float
+  notes       String?
+  createdAt   DateTime    @default(now())
+
+  agency     Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  customer   User        @relation("CustomerOrders", fields: [customerId], references: [id])
+  employee   User?       @relation("EmployeeOrders", fields: [employeeId], references: [id])
+  items      OrderItem[]
+  payments   Payment[]
+}
+
+model OrderItem {
+  id        Int   @id @default(autoincrement())
+  orderId   Int
+  productId Int
+  quantity  Int
+  price     Float
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Payment {
+  id          Int      @id @default(autoincrement())
+  agencyId    Int
+  orderId     Int
+  employeeId  Int
+  amount      Float
+  method      String   @default("CASH") // CASH, UPI, BANK_TRANSFER
+  notes       String?
+  paymentDate DateTime @default(now())
+
+  agency   Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  order    Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  employee User   @relation(fields: [employeeId], references: [id])
+}

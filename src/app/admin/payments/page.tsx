@@ -10,6 +10,7 @@ interface Payment {
     paymentDate: string;
     order: { id: number; totalAmount: number; customer: { name: string } };
     employee: { id: number; name: string };
+    agency?: { name: string };
 }
 
 export default function AdminPayments() {
@@ -42,11 +43,12 @@ export default function AdminPayments() {
             <div className="table-wrapper">
                 <table>
                     <thead>
-                        <tr><th>#</th><th>Order</th><th>Customer</th><th>Employee</th><th>Amount</th><th>Method</th><th>Date</th></tr>
+                        <tr><th>Agency</th><th>#</th><th>Order</th><th>Customer</th><th>Employee</th><th>Amount</th><th>Method</th><th>Date</th></tr>
                     </thead>
                     <tbody>
                         {payments.map(p => (
                             <tr key={p.id}>
+                                <td>{p.agency?.name || '—'}</td>
                                 <td>{p.id}</td>
                                 <td>Order #{p.order.id}</td>
                                 <td style={{ color: 'var(--text-primary)' }}>{p.order.customer.name}</td>
@@ -56,7 +58,7 @@ export default function AdminPayments() {
                                 <td>{new Date(p.paymentDate).toLocaleDateString()}</td>
                             </tr>
                         ))}
-                        {payments.length === 0 && <tr><td colSpan={7}><div className="empty-state">No payments recorded yet</div></td></tr>}
+                        {payments.length === 0 && <tr><td colSpan={8}><div className="empty-state">No payments recorded yet</div></td></tr>}
                     </tbody>
                 </table>
             </div>

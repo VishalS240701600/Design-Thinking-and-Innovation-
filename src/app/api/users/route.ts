@@ -20,11 +20,14 @@ export async function GET(request: NextRequest) {
         }
     }
 
-    const where: Record<string, unknown> = { agencyId: user.agencyId };
+    const where: Record<string, unknown> = user.role === 'ADMIN' ? {} : { agencyId: user.agencyId };
     if (role) where.role = role;
     const users = await prisma.user.findMany({
         where,
-        select: { id: true, name: true, email: true, role: true, phone: true, address: true, createdAt: true },
+        select: {
+            id: true, name: true, email: true, role: true, phone: true, address: true, createdAt: true,
+            ...(user.role === 'ADMIN' ? { agency: { select: { name: true } } } : {})
+        },
         orderBy: { createdAt: 'desc' },
     });
 
@@ -39,18 +42,16 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { id, name, email, password, role, phone, address } = body;
+    const { id, name, email, password, role, phone, address, agencyId } = body;
 
     if (!name || !email) {
         return NextResponse.json({ error: 'Name and email are required' }, { status: 400 });
     }
 
-    if (id) {
-        // SECURITY PATCH: Verify the user belongs to the admin's agency before updating
-        const existing = await prisma.user.findFirst({ where: { id, agencyId: authUser.agencyId } });
-        if (!existing) return NextResponse.json({ error: 'User not found or unauthorized' }, { status: 404 });
+    if (!id && !agencyId) return NextResponse.json({ error: 'Agency selection is required' }, { status: 400 });
 
-        const data: Record<string, unknown> = { name, email, role, phone, address };
+    if (id) {
+        const data: Record<string, unknown> = { name, email, role, phone, address, agencyId: agencyId ? parseInt(agencyId) : undefined };
         if (password) data.password = await hashPassword(password);
         const user = await prisma.user.update({ where: { id }, data });
         return NextResponse.json({ id: user.id, name: user.name, email: user.email, role: user.role });
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
         if (!password) return NextResponse.json({ error: 'Password is required' }, { status: 400 });
         const hashed = await hashPassword(password);
         const user = await prisma.user.create({
-            data: { agencyId: authUser.agencyId, name, email, password: hashed, role: role || 'CUSTOMER', phone, address },
+            data: { agencyId: parseInt(agencyId), name, email, password: hashed, role: role || 'CUSTOMER', phone, address },
         });
         return NextResponse.json({ id: user.id, name: user.name, email: user.email, role: user.role });
     }
@@ -77,9 +78,9 @@ export async function DELETE(request: NextRequest) {
 
     const parsedId = parseInt(id);
 
-    // SECURITY PATCH: Ensure the deleted user belongs to the caller's agency
+    // Global Admin can delete any user
     await prisma.user.deleteMany({
-        where: { id: parsedId, agencyId: authUser.agencyId }
+        where: { id: parsedId }
     });
     return NextResponse.json({ success: true });
 }

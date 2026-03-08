@@ -8,9 +8,35 @@ export async function GET(request: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (id) {
+        let where: Record<string, unknown> = { id: parseInt(id) };
+        if (user.role !== 'ADMIN') where.agencyId = user.agencyId;
+
+        if (user.role === 'CUSTOMER') where.customerId = user.id;
+        if (user.role === 'EMPLOYEE') where.employeeId = user.id;
+
+        const order = await prisma.order.findFirst({
+            where,
+            include: {
+                items: { include: { product: { select: { name: true, price: true, unit: true } } } },
+                customer: { select: { name: true, email: true, phone: true } },
+                employee: { select: { name: true } },
+                payments: true,
+                ...(user.role === 'ADMIN' ? { agency: { select: { name: true } } } : {})
+            }
+        });
+        if (!order) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json(order);
+    }
+
     const status = searchParams.get('status');
 
-    let where: Record<string, unknown> = { agencyId: user.agencyId };
+    let where: Record<string, unknown> = {};
+    if (user.role !== 'ADMIN') {
+        where.agencyId = user.agencyId;
+    }
     if (user.role === 'CUSTOMER') where.customerId = user.id;
     if (status) where.status = status;
 
@@ -21,6 +47,7 @@ export async function GET(request: NextRequest) {
             employee: { select: { id: true, name: true } },
             items: { include: { product: { select: { name: true, unit: true } } } },
             payments: true,
+            ...(user.role === 'ADMIN' ? { agency: { select: { name: true } } } : {})
         },
         orderBy: { createdAt: 'desc' },
     });
@@ -84,23 +111,22 @@ export async function POST(request: NextRequest) {
 }
 
 // PATCH: update order status (admin only)
-export async function PATCH(request: NextRequest) {
+export async function PUT(request: NextRequest) {
     const user = await getAuthUser();
-    if (!user || user.role !== 'ADMIN') {
+    if (!user || !['ADMIN', 'EMPLOYEE'].includes(user.role)) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
     const body = await request.json();
     const { id, status } = body;
+    if (!id || !status) return NextResponse.json({ error: 'ID and status required' }, { status: 400 });
 
-    // SECURITY PATCH: Check order ownership before updating status
-    const existing = await prisma.order.findFirst({ where: { id, agencyId: user.agencyId } });
-    if (!existing) return NextResponse.json({ error: 'Order not found or unauthorized' }, { status: 404 });
+    const existing = await prisma.order.findFirst({ where: { id: parseInt(id), ...(user.role !== 'ADMIN' ? { agencyId: user.agencyId } : {}) } });
+    if (!existing) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
     const order = await prisma.order.update({
-        where: { id },
-        data: { status },
+        where: { id: parseInt(id) },
+        data: { status }
     });
-
     return NextResponse.json(order);
 }

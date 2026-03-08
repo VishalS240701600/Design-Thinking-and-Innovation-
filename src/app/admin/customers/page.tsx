@@ -10,6 +10,7 @@ interface User {
     phone: string | null;
     address: string | null;
     createdAt: string;
+    agency?: { name: string };
 }
 
 export default function AdminCustomers() {
@@ -85,11 +86,12 @@ export default function AdminCustomers() {
             <div className="table-wrapper">
                 <table>
                     <thead>
-                        <tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Actions</th></tr>
+                        <tr><th>Agency</th><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Actions</th></tr>
                     </thead>
                     <tbody>
                         {users.map(u => (
                             <tr key={u.id}>
+                                <td>{u.agency?.name || '—'}</td>
                                 <td style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{u.name}</td>
                                 <td>{u.email}</td>
                                 <td>{u.phone || '—'}</td>
@@ -102,7 +104,7 @@ export default function AdminCustomers() {
                                 </td>
                             </tr>
                         ))}
-                        {users.length === 0 && <tr><td colSpan={5}><div className="empty-state">No customers found</div></td></tr>}
+                        {users.length === 0 && <tr><td colSpan={6}><div className="empty-state">No customers found</div></td></tr>}
                     </tbody>
                 </table>
             </div>

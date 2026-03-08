@@ -18,6 +18,7 @@ interface Order {
     customer: { id: number; name: string; email: string };
     employee: { id: number; name: string } | null;
     items: OrderItem[];
+    agency?: { name: string };
 }
 
 export default function AdminOrders() {
@@ -29,7 +30,7 @@ export default function AdminOrders() {
 
     const updateStatus = async (id: number, status: string) => {
         await fetch('/api/orders', {
-            method: 'PATCH',
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id, status }),
         });
@@ -76,11 +77,12 @@ export default function AdminOrders() {
             <div className="table-wrapper">
                 <table>
                     <thead>
-                        <tr><th>#</th><th>Customer</th><th>Employee</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr>
+                        <tr><th>Agency</th><th>#</th><th>Customer</th><th>Employee</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr>
                     </thead>
                     <tbody>
                         {orders.map(o => (
                             <tr key={o.id}>
+                                <td>{o.agency?.name || '—'}</td>
                                 <td><a href="#" onClick={e => { e.preventDefault(); setSelected(o); }}>#{o.id}</a></td>
                                 <td style={{ color: 'var(--text-primary)' }}>{o.customer.name}</td>
                                 <td>{o.employee?.name || '—'}</td>
@@ -102,7 +104,7 @@ export default function AdminOrders() {
                                 </td>
                             </tr>
                         ))}
-                        {orders.length === 0 && <tr><td colSpan={7}><div className="empty-state">No orders found</div></td></tr>}
+                        {orders.length === 0 && <tr><td colSpan={8}><div className="empty-state">No orders found</div></td></tr>}
                     </tbody>
                 </table>
             </div>

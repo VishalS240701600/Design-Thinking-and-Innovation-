@@ -7,8 +7,9 @@ export async function GET() {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const products = await prisma.product.findMany({
-        where: { agencyId: user.agencyId },
-        orderBy: { createdAt: 'desc' }
+        where: user.role === 'ADMIN' ? undefined : { agencyId: user.agencyId },
+        orderBy: { createdAt: 'desc' },
+        include: user.role === 'ADMIN' ? { agency: { select: { name: true } } } : undefined
     });
     return NextResponse.json(products);
 }
@@ -18,22 +19,21 @@ export async function POST(request: NextRequest) {
     if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
 
     const body = await request.json();
-    const { id, name, description, price, stock, unit, category } = body;
+    const { id, name, description, price, stock, unit, category, agencyId } = body;
     if (!name || price === undefined) return NextResponse.json({ error: 'Name and price required' }, { status: 400 });
 
-    if (id) {
-        // SECURITY PATCH: Ensure product belongs to the admin's agency
-        const existing = await prisma.product.findFirst({ where: { id, agencyId: user.agencyId } });
-        if (!existing) return NextResponse.json({ error: 'Product not found or unauthorized' }, { status: 404 });
+    if (!id && !agencyId) return NextResponse.json({ error: 'Agency selection is required' }, { status: 400 });
 
+    if (id) {
+        // Global Admins can update any product, optionally we could check existence
         const product = await prisma.product.update({
             where: { id },
-            data: { name, description, price: parseFloat(price), stock: parseInt(stock), unit, category },
+            data: { name, description, price: parseFloat(price), stock: parseInt(stock), unit, category, agencyId: agencyId ? parseInt(agencyId) : undefined },
         });
         return NextResponse.json(product);
     } else {
         const product = await prisma.product.create({
-            data: { agencyId: user.agencyId, name, description, price: parseFloat(price), stock: parseInt(stock) || 0, unit: unit || 'pcs', category },
+            data: { agencyId: parseInt(agencyId), name, description, price: parseFloat(price), stock: parseInt(stock) || 0, unit: unit || 'pcs', category },
         });
         return NextResponse.json(product);
     }
@@ -49,9 +49,9 @@ export async function DELETE(request: NextRequest) {
 
     const parsedId = parseInt(id);
 
-    // SECURITY PATCH: Delete product scoped to agency
+    // Global Admin can delete any product
     await prisma.product.deleteMany({
-        where: { id: parsedId, agencyId: user.agencyId }
+        where: { id: parsedId }
     });
     return NextResponse.json({ success: true });
 }

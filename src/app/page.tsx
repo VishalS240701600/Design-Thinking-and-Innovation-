@@ -32,8 +32,8 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
-    if (!form.agencyId) {
-      setError('Please select an agency');
+    if (!isLogin && !form.agencyId) {
+      setError('Please select an agency to register');
       setLoading(false);
       return;
     }
@@ -75,12 +75,12 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>Agency / Distributorship</label>
+            <label>Agency / Distributorship {isLogin && <span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: 'var(--text-secondary)' }}>(Optional for Global Admin)</span>}</label>
             <select
               className="form-control"
               value={form.agencyId}
               onChange={(e) => setForm({ ...form, agencyId: e.target.value })}
-              required
+              required={!isLogin}
             >
               <option value="">— Select your Agency —</option>
               {agencies.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}

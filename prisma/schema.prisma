@@ -22,7 +22,7 @@ model Agency {
 
 model User {
   id        Int      @id @default(autoincrement())
-  agencyId  Int
+  agencyId  Int?
   name      String
   email     String
   password  String
@@ -31,7 +31,7 @@ model User {
   address   String?
   createdAt DateTime @default(now())
 
-  agency           Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agency           Agency?   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   ordersAsCustomer Order[]   @relation("CustomerOrders")
   ordersAsEmployee Order[]   @relation("EmployeeOrders")
   payments         Payment[]

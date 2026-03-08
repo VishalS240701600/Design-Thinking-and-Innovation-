@@ -8,17 +8,16 @@ export async function GET(request: NextRequest) {
 
     if (user.role === 'ADMIN') {
         const [totalProducts, totalCustomers, totalEmployees, totalOrders, orders, payments] = await Promise.all([
-            prisma.product.count({ where: { agencyId: user.agencyId } }),
-            prisma.user.count({ where: { role: 'CUSTOMER', agencyId: user.agencyId } }),
-            prisma.user.count({ where: { role: 'EMPLOYEE', agencyId: user.agencyId } }),
-            prisma.order.count({ where: { agencyId: user.agencyId } }),
+            prisma.product.count(), // Global count
+            prisma.user.count({ where: { role: 'CUSTOMER' } }),
+            prisma.user.count({ where: { role: 'EMPLOYEE' } }),
+            prisma.order.count(),
             prisma.order.findMany({
-                where: { agencyId: user.agencyId },
-                take: 5,
+                take: 10,
                 orderBy: { createdAt: 'desc' },
                 include: { customer: { select: { name: true } } },
             }),
-            prisma.payment.aggregate({ where: { agencyId: user.agencyId }, _sum: { amount: true } }),
+            prisma.payment.aggregate({ _sum: { amount: true } }),
         ]);
 
         return NextResponse.json({

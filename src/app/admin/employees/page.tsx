@@ -10,19 +10,29 @@ interface User {
     phone: string | null;
     address: string | null;
     createdAt: string;
+    agency?: { name: string };
+}
+
+interface Agency {
+    id: number;
+    name: string;
 }
 
 export default function AdminEmployees() {
     const [users, setUsers] = useState<User[]>([]);
+    const [agencies, setAgencies] = useState<Agency[]>([]);
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] = useState<User | null>(null);
-    const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', address: '' });
+    const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', address: '', agencyId: '' });
 
     const load = () => fetch('/api/users?role=EMPLOYEE').then(r => r.json()).then(setUsers);
-    useEffect(() => { load(); }, []);
+    useEffect(() => {
+        load();
+        fetch('/api/agencies').then(r => r.json()).then(data => setAgencies(Array.isArray(data) ? data : []));
+    }, []);
 
-    const openAdd = () => { setEditing(null); setForm({ name: '', email: '', password: '', phone: '', address: '' }); setShowForm(true); };
-    const openEdit = (u: User) => { setEditing(u); setForm({ name: u.name, email: u.email, password: '', phone: u.phone || '', address: u.address || '' }); setShowForm(true); };
+    const openAdd = () => { setEditing(null); setForm({ name: '', email: '', password: '', phone: '', address: '', agencyId: '' }); setShowForm(true); };
+    const openEdit = (u: User) => { setEditing(u); setForm({ name: u.name, email: u.email, password: '', phone: u.phone || '', address: u.address || '', agencyId: '' }); setShowForm(true); };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -53,6 +63,13 @@ export default function AdminEmployees() {
                     <div className="modal" onClick={e => e.stopPropagation()}>
                         <h2>{editing ? 'Edit Employee' : 'Add Employee'}</h2>
                         <form onSubmit={handleSubmit}>
+                            <div className="form-group">
+                                <label>Agency</label>
+                                <select className="form-control" value={form.agencyId} onChange={e => setForm({ ...form, agencyId: e.target.value })} required={!editing}>
+                                    <option value="">— Select Agency —</option>
+                                    {agencies.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                                </select>
+                            </div>
                             <div className="form-group">
                                 <label>Full Name</label>
                                 <input className="form-control" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
@@ -87,11 +104,12 @@ export default function AdminEmployees() {
             <div className="table-wrapper">
                 <table>
                     <thead>
-                        <tr><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Actions</th></tr>
+                        <tr><th>Agency</th><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Actions</th></tr>
                     </thead>
                     <tbody>
                         {users.map(u => (
                             <tr key={u.id}>
+                                <td>{u.agency?.name || '—'}</td>
                                 <td style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{u.name}</td>
                                 <td>{u.email}</td>
                                 <td>{u.phone || '—'}</td>
@@ -104,7 +122,7 @@ export default function AdminEmployees() {
                                 </td>
                             </tr>
                         ))}
-                        {users.length === 0 && <tr><td colSpan={5}><div className="empty-state">No employees found</div></td></tr>}
+                        {users.length === 0 && <tr><td colSpan={6}><div className="empty-state">No employees found</div></td></tr>}
                     </tbody>
                 </table>
             </div>

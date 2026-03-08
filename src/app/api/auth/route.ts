@@ -62,15 +62,24 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'login') {
-        if (!email || !password || !agencyId) {
-            return NextResponse.json({ error: 'Agency, email and password are required' }, { status: 400 });
+        if (!email || !password) {
+            return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
         }
 
-        const parsedAgencyId = parseInt(agencyId);
-        const user = await prisma.user.findUnique({
-            where: { email_agencyId: { email, agencyId: parsedAgencyId } },
-            include: { agency: true }
-        });
+        let user;
+        if (agencyId) {
+            const parsedAgencyId = parseInt(agencyId);
+            user = await prisma.user.findUnique({
+                where: { email_agencyId: { email, agencyId: parsedAgencyId } },
+                include: { agency: true }
+            });
+        } else {
+            // Global Admin Login
+            user = await prisma.user.findFirst({
+                where: { email, role: 'ADMIN' },
+                include: { agency: true }
+            });
+        }
 
         if (!user) {
             return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
@@ -83,8 +92,8 @@ export async function POST(request: NextRequest) {
 
         const token = generateToken({
             id: user.id,
-            agencyId: user.agencyId,
-            themeColor: user.agency.themeColor,
+            agencyId: user.agencyId || 0, // 0 or whatever your token logic expects for null
+            themeColor: user.agency?.themeColor || '#0066cc',
             name: user.name,
             email: user.email,
             role: user.role

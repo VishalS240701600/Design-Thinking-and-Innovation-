@@ -7,7 +7,11 @@ export async function GET(request: NextRequest) {
     const user = await getAuthUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    let where: Record<string, unknown> = { agencyId: user.agencyId };
+    let where: Record<string, unknown> = user.role === 'ADMIN' ? {} : { agencyId: user.agencyId };
+
+    // CUSTOMER payment viewing (futureproofing, though normally EMP/ADMIN only)
+    // if (user.role === 'CUSTOMER') ...
+    // EMPLOYEE sees their own collected payments unless they need to see agency
     if (user.role === 'EMPLOYEE') where.employeeId = user.id;
 
     const { searchParams } = new URL(request.url);
@@ -17,10 +21,9 @@ export async function GET(request: NextRequest) {
     const payments = await prisma.payment.findMany({
         where,
         include: {
-            order: {
-                select: { id: true, totalAmount: true, customer: { select: { name: true } } },
-            },
+            order: { select: { id: true, totalAmount: true, customer: { select: { name: true } } } },
             employee: { select: { id: true, name: true } },
+            ...(user.role === 'ADMIN' ? { agency: { select: { name: true } } } : {})
         },
         orderBy: { paymentDate: 'desc' },
     });
@@ -55,7 +58,7 @@ export async function POST(request: NextRequest) {
         include: { payments: true }
     });
 
-    if (!order || order.agencyId !== user.agencyId) {
+    if (!order || (user.role !== 'ADMIN' && order.agencyId !== user.agencyId)) {
         return NextResponse.json({ error: 'Order not found or unauthorized' }, { status: 404 });
     }
 

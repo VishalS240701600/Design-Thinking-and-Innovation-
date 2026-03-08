@@ -12,7 +12,19 @@ export default function LoginPage() {
   const [agencies, setAgencies] = useState<{ id: number, name: string }[]>([]);
 
   useEffect(() => {
-    fetch('/api/agencies').then(r => r.json()).then(setAgencies);
+    fetch('/api/agencies')
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to fetch');
+        return r.json();
+      })
+      .then(data => {
+        if (Array.isArray(data)) setAgencies(data);
+        else console.error('Expected array of agencies, got:', data);
+      })
+      .catch(err => {
+        console.error('Agency fetch error:', err);
+        setError('Could not connect to the server. Please check your database connection.');
+      });
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

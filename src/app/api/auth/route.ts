@@ -20,6 +20,12 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Email already registered in this agency' }, { status: 400 });
         }
 
+        if (role && role.toUpperCase() === 'ADMIN') {
+            return NextResponse.json({ error: 'Admin registration is not allowed.' }, { status: 403 });
+        }
+
+        const validRole = role && ['CUSTOMER', 'EMPLOYEE'].includes(role.toUpperCase()) ? role.toUpperCase() : 'CUSTOMER';
+
         const hashed = await hashPassword(password);
         const user = await prisma.user.create({
             data: {
@@ -27,7 +33,7 @@ export async function POST(request: NextRequest) {
                 name,
                 email,
                 password: hashed,
-                role: role || 'CUSTOMER',
+                role: validRole,
             },
             include: { agency: true }
         });

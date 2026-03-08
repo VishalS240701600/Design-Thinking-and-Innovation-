@@ -20,9 +20,10 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
         fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'me' }) })
             .then(res => res.json())
             .then(data => {
-                if (!data.user || data.user.role !== 'CUSTOMER') { router.push('/'); return; }
+                if (!data || !data.user || data.user.role !== 'CUSTOMER') { router.push('/'); return; }
                 setUser(data.user);
-            });
+            })
+            .catch(() => router.push('/'));
     }, [router]);
 
     const handleLogout = async () => {

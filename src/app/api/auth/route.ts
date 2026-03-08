@@ -40,8 +40,8 @@ export async function POST(request: NextRequest) {
 
         const token = generateToken({
             id: user.id,
-            agencyId: user.agencyId,
-            themeColor: user.agency.themeColor,
+            agencyId: user.agencyId || 0,
+            themeColor: user.agency?.themeColor || '#0066cc',
             name: user.name,
             email: user.email,
             role: user.role

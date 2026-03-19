@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Package } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -68,6 +69,9 @@ export default function LoginPage() {
 
   return (
     <div className="auth-page">
+      <div style={{ position: 'absolute', top: '24px', right: '24px' }}>
+        <ThemeToggle />
+      </div>
       <div className="auth-card">
         <h1 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}><Package size={32} /> FMCG Distribution</h1>
         <p className="subtitle">{isLogin ? 'Sign in to your account' : 'Create a new account'}</p>

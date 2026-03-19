@@ -9,32 +9,30 @@ datasource db {
 }
 
 model Agency {
-  id         Int      @id @default(autoincrement())
-  name       String   @unique
-  themeColor String   @default("#0066cc")
-  createdAt  DateTime @default(now())
-
-  users      User[]
-  products   Product[]
+  id         Int       @id @default(autoincrement())
+  name       String    @unique
+  themeColor String    @default("#0066cc")
+  createdAt  DateTime  @default(now())
   orders     Order[]
   payments   Payment[]
+  products   Product[]
+  users      User[]
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  agencyId  Int?
-  name      String
-  email     String
-  password  String
-  role      String   @default("CUSTOMER") // ADMIN, EMPLOYEE, CUSTOMER
-  phone     String?
-  address   String?
-  createdAt DateTime @default(now())
-
-  agency           Agency?   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  id               Int       @id @default(autoincrement())
+  agencyId         Int?
+  name             String
+  email            String
+  password         String
+  role             String    @default("CUSTOMER")
+  phone            String?
+  address          String?
+  createdAt        DateTime  @default(now())
   ordersAsCustomer Order[]   @relation("CustomerOrders")
   ordersAsEmployee Order[]   @relation("EmployeeOrders")
   payments         Payment[]
+  agency           Agency?   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
 
   @@unique([email, agencyId])
 }
@@ -49,9 +47,8 @@ model Product {
   unit        String      @default("pcs")
   category    String?
   createdAt   DateTime    @default(now())
-
-  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   orderItems  OrderItem[]
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
 }
 
 model Order {
@@ -59,27 +56,25 @@ model Order {
   agencyId    Int
   customerId  Int
   employeeId  Int?
-  status      String      @default("PENDING") // PENDING, CONFIRMED, DELIVERED, CANCELLED
+  status      String      @default("PENDING")
   totalAmount Float
   notes       String?
   createdAt   DateTime    @default(now())
-
-  agency     Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  customer   User        @relation("CustomerOrders", fields: [customerId], references: [id])
-  employee   User?       @relation("EmployeeOrders", fields: [employeeId], references: [id])
-  items      OrderItem[]
-  payments   Payment[]
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  customer    User        @relation("CustomerOrders", fields: [customerId], references: [id])
+  employee    User?       @relation("EmployeeOrders", fields: [employeeId], references: [id])
+  items       OrderItem[]
+  payments    Payment[]
 }
 
 model OrderItem {
-  id        Int   @id @default(autoincrement())
+  id        Int     @id @default(autoincrement())
   orderId   Int
   productId Int
   quantity  Int
   price     Float
-
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
 }
 
 model Payment {
@@ -88,11 +83,10 @@ model Payment {
   orderId     Int
   employeeId  Int
   amount      Float
-  method      String   @default("CASH") // CASH, UPI, BANK_TRANSFER
+  method      String   @default("CASH")
   notes       String?
   paymentDate DateTime @default(now())
-
-  agency   Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  order    Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  employee User   @relation(fields: [employeeId], references: [id])
+  agency      Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  employee    User     @relation(fields: [employeeId], references: [id])
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }

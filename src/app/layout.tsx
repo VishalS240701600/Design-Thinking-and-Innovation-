@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { getAuthUser } from "@/lib/auth";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 export const metadata: Metadata = {
   title: "FMCG Distribution Manager",
@@ -16,8 +17,12 @@ export default async function RootLayout({
   const themeColor = user?.themeColor || "#0066cc";
 
   return (
-    <html lang="en">
-      <body style={{ '--primary-color': themeColor } as React.CSSProperties}>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body style={{ '--primary-color': themeColor } as React.CSSProperties}>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Package, ClipboardList } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 interface User {
     id: number;
@@ -42,9 +43,12 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
     return (
         <div className="app-layout">
             <aside className="sidebar">
-                <div className="sidebar-brand">
-                    <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Package size={22} /> FMCG Dist.</h2>
-                    <span>Customer Portal</span>
+                <div className="sidebar-brand" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Package size={22} /> FMCG Dist.</h2>
+                        <span>Customer Portal</span>
+                    </div>
+                    <ThemeToggle />
                 </div>
                 <nav className="sidebar-nav">
                     {links.map(link => (

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Package, ShoppingCart, Cookie, Beaker, Brush, Milk, Utensils, Croissant, SprayCan, Droplets, Coffee, EggFried } from 'lucide-react';
 
 interface Product { id: number; name: string; description: string | null; price: number; stock: number; unit: string; category: string | null; }
 interface CartItem { productId: number; name: string; price: number; quantity: number; unit: string; }
@@ -41,7 +42,7 @@ export default function CustomerProducts() {
             body: JSON.stringify({ items: cart.map(c => ({ productId: c.productId, quantity: c.quantity })) }),
         });
         if (res.ok) {
-            setSuccess('Order placed successfully! 🎉');
+            setSuccess('Order placed successfully!');
             setCart([]);
             setShowCart(false);
             setTimeout(() => setSuccess(''), 4000);
@@ -51,11 +52,20 @@ export default function CustomerProducts() {
         }
     };
 
-    // Emoji map for categories
-    const categoryEmoji: Record<string, string> = {
-        'Biscuits': '🍪', 'Staples': '🧂', 'Detergent': '🧹', 'Dairy': '🧈',
-        'Noodles': '🍜', 'Bakery': '🍞', 'Personal Care': '🧼', 'Cleaning': '🫧',
-        'Beverages': '☕', 'Cooking Oil': '🫒',
+    const getCategoryIcon = (cat: string | null) => {
+        switch(cat) {
+            case 'Biscuits': return <Cookie size={40} className="text-muted" color="var(--text-secondary)" />;
+            case 'Staples': return <Beaker size={40} className="text-muted" color="var(--text-secondary)" />;
+            case 'Detergent': return <Brush size={40} className="text-muted" color="var(--text-secondary)" />;
+            case 'Dairy': return <Milk size={40} className="text-muted" color="var(--text-secondary)" />;
+            case 'Noodles': return <Utensils size={40} className="text-muted" color="var(--text-secondary)" />;
+            case 'Bakery': return <Croissant size={40} className="text-muted" color="var(--text-secondary)" />;
+            case 'Personal Care': return <SprayCan size={40} className="text-muted" color="var(--text-secondary)" />;
+            case 'Cleaning': return <Droplets size={40} className="text-muted" color="var(--text-secondary)" />;
+            case 'Beverages': return <Coffee size={40} className="text-muted" color="var(--text-secondary)" />;
+            case 'Cooking Oil': return <EggFried size={40} className="text-muted" color="var(--text-secondary)" />;
+            default: return <Package size={40} className="text-muted" color="var(--text-secondary)" />;
+        }
     };
 
     return (
@@ -66,7 +76,7 @@ export default function CustomerProducts() {
                     <p>Browse and order products</p>
                 </div>
                 <button className="btn btn-primary" onClick={() => setShowCart(true)}>
-                    🛒 Cart ({cartCount})
+                    <ShoppingCart size={18} /> Cart ({cartCount})
                 </button>
             </div>
 
@@ -76,7 +86,7 @@ export default function CustomerProducts() {
             {showCart && (
                 <div className="modal-overlay" onClick={() => setShowCart(false)}>
                     <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
-                        <h2>🛒 Your Cart</h2>
+                        <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><ShoppingCart size={24} /> Your Cart</h2>
                         {error && <div className="error-msg">{error}</div>}
                         {cart.length === 0 ? (
                             <div className="empty-state"><p>Your cart is empty</p></div>
@@ -114,7 +124,7 @@ export default function CustomerProducts() {
                 {products.map(p => (
                     <div className="product-card" key={p.id}>
                         <div className="product-card-img">
-                            {categoryEmoji[p.category || ''] || '📦'}
+                            {getCategoryIcon(p.category)}
                         </div>
                         <div className="product-card-body">
                             <div className="category">{p.category || 'General'}</div>

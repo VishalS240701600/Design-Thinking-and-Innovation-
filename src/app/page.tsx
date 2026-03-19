@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { Package } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -68,7 +69,7 @@ export default function LoginPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1>📦 FMCG Distribution</h1>
+        <h1 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}><Package size={32} /> FMCG Distribution</h1>
         <p className="subtitle">{isLogin ? 'Sign in to your account' : 'Create a new account'}</p>
 
         {error && <div className="error-msg">{error}</div>}

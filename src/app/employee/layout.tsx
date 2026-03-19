@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { LayoutDashboard, ClipboardList, IndianRupee, Package } from 'lucide-react';
 
 interface User {
     id: number;
@@ -34,16 +35,16 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
     if (!user) return <div className="auth-page"><p>Loading...</p></div>;
 
     const links = [
-        { href: '/employee', label: 'Dashboard', icon: '📊' },
-        { href: '/employee/orders', label: 'Enter Order', icon: '📋' },
-        { href: '/employee/payments', label: 'Record Payment', icon: '💰' },
+        { href: '/employee', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+        { href: '/employee/orders', label: 'Enter Order', icon: <ClipboardList size={18} /> },
+        { href: '/employee/payments', label: 'Record Payment', icon: <IndianRupee size={18} /> },
     ];
 
     return (
         <div className="app-layout">
             <aside className="sidebar">
                 <div className="sidebar-brand">
-                    <h2>📦 FMCG Dist.</h2>
+                    <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Package size={22} /> FMCG Dist.</h2>
                     <span>Employee Portal</span>
                 </div>
                 <nav className="sidebar-nav">

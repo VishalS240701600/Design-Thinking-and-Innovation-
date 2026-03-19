@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { Package, ClipboardList } from 'lucide-react';
 
 interface User {
     id: number;
@@ -34,15 +35,15 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
     if (!user) return <div className="auth-page"><p>Loading...</p></div>;
 
     const links = [
-        { href: '/customer', label: 'Products', icon: '📦' },
-        { href: '/customer/orders', label: 'My Orders', icon: '📋' },
+        { href: '/customer', label: 'Products', icon: <Package size={18} /> },
+        { href: '/customer/orders', label: 'My Orders', icon: <ClipboardList size={18} /> },
     ];
 
     return (
         <div className="app-layout">
             <aside className="sidebar">
                 <div className="sidebar-brand">
-                    <h2>📦 FMCG Dist.</h2>
+                    <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Package size={22} /> FMCG Dist.</h2>
                     <span>Customer Portal</span>
                 </div>
                 <nav className="sidebar-nav">

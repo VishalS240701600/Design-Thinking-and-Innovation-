@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { LayoutDashboard, Package, Users, Store, ClipboardList, IndianRupee, Settings } from 'lucide-react';
 
 interface User {
     id: number;
@@ -34,20 +35,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     if (!user) return <div className="auth-page"><p>Loading...</p></div>;
 
     const links = [
-        { href: '/admin', label: 'Dashboard', icon: '📊' },
-        { href: '/admin/products', label: 'Products', icon: '📦' },
-        { href: '/admin/employees', label: 'Employees', icon: '👥' },
-        { href: '/admin/customers', label: 'Customers', icon: '🏪' },
-        { href: '/admin/orders', label: 'Orders', icon: '📋' },
-        { href: '/admin/payments', label: 'Payments', icon: '💰' },
-        { href: '/admin/settings', label: 'Settings', icon: '⚙️' },
+        { href: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+        { href: '/admin/products', label: 'Products', icon: <Package size={18} /> },
+        { href: '/admin/employees', label: 'Employees', icon: <Users size={18} /> },
+        { href: '/admin/customers', label: 'Customers', icon: <Store size={18} /> },
+        { href: '/admin/orders', label: 'Orders', icon: <ClipboardList size={18} /> },
+        { href: '/admin/payments', label: 'Payments', icon: <IndianRupee size={18} /> },
+        { href: '/admin/settings', label: 'Settings', icon: <Settings size={18} /> },
     ];
 
     return (
         <div className="app-layout">
             <aside className="sidebar">
                 <div className="sidebar-brand">
-                    <h2>📦 FMCG Dist.</h2>
+                    <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Package size={22} /> FMCG Dist.</h2>
                     <span>Admin Portal</span>
                 </div>
                 <nav className="sidebar-nav">

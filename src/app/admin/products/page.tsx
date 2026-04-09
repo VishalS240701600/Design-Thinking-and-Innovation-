@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { UploadCloud } from 'lucide-react';
 
 interface Product {
     id: number;
@@ -21,9 +22,19 @@ interface Agency {
 export default function AdminProducts() {
     const [products, setProducts] = useState<Product[]>([]);
     const [agencies, setAgencies] = useState<Agency[]>([]);
+    
+    // Single Product Form
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] = useState<Product | null>(null);
     const [form, setForm] = useState({ name: '', description: '', price: '', stock: '', unit: 'pcs', category: '', agencyId: '' });
+
+    // Bulk Upload
+    const [showBulkForm, setShowBulkForm] = useState(false);
+    const [bulkAgency, setBulkAgency] = useState('');
+    const [bulkFile, setBulkFile] = useState<File | null>(null);
+    const [bulkLoading, setBulkLoading] = useState(false);
+    const [bulkResult, setBulkResult] = useState<{ success?: string, error?: string } | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const load = () => fetch('/api/products').then(r => r.json()).then(setProducts);
 
@@ -52,6 +63,46 @@ export default function AdminProducts() {
         load();
     };
 
+    const handleBulkUpload = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!bulkFile || !bulkAgency) return;
+
+        setBulkLoading(true);
+        setBulkResult(null);
+
+        const formData = new FormData();
+        formData.append('file', bulkFile);
+        formData.append('agencyId', bulkAgency);
+
+        try {
+            const res = await fetch('/api/products/bulk', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+            
+            if (res.ok) {
+                setBulkResult({ success: `Successfully imported ${data.imported} products across ${data.categories?.length || 0} categories. Skipped ${data.skippedRows || 0} invalid rows.` });
+                setBulkFile(null);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+                load();
+            } else {
+                setBulkResult({ error: data.error || 'Failed to upload' });
+            }
+        } catch (err) {
+            setBulkResult({ error: 'Something went wrong during upload' });
+        } finally {
+            setBulkLoading(false);
+        }
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            setBulkFile(e.target.files[0]);
+            setBulkResult(null);
+        }
+    };
+
     return (
         <>
             <div className="page-header flex-between">
@@ -59,9 +110,15 @@ export default function AdminProducts() {
                     <h1>Products</h1>
                     <p>Manage your product catalog</p>
                 </div>
-                <button className="btn btn-primary" onClick={openAdd}>+ Add Product</button>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                    <button className="btn btn-secondary" onClick={() => { setShowBulkForm(true); setBulkResult(null); setBulkFile(null); }}>
+                        <UploadCloud size={16} /> Bulk Upload
+                    </button>
+                    <button className="btn btn-primary" onClick={openAdd}>+ Add Product</button>
+                </div>
             </div>
 
+            {/* Single Product Modal */}
             {showForm && (
                 <div className="modal-overlay" onClick={() => setShowForm(false)}>
                     <div className="modal" onClick={e => e.stopPropagation()}>
@@ -105,6 +162,61 @@ export default function AdminProducts() {
                             <div className="modal-actions">
                                 <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
                                 <button type="submit" className="btn btn-primary">{editing ? 'Update' : 'Create'}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Bulk Upload Modal */}
+            {showBulkForm && (
+                <div className="modal-overlay" onClick={() => setShowBulkForm(false)}>
+                    <div className="modal" onClick={e => e.stopPropagation()}>
+                        <h2>Bulk Upload Products</h2>
+                        <p style={{ marginBottom: '20px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                            Upload an Excel file (.xlsx) with your stock statement. It should contain columns like Particulars, Unit, Stock, and Cost Rs.
+                        </p>
+                        
+                        {bulkResult?.success && <div className="success-msg" style={{ marginBottom: '15px' }}>{bulkResult.success}</div>}
+                        {bulkResult?.error && <div className="error-msg" style={{ marginBottom: '15px' }}>{bulkResult.error}</div>}
+
+                        <form onSubmit={handleBulkUpload}>
+                            <div className="form-group">
+                                <label>Assign to Agency</label>
+                                <select className="form-control" value={bulkAgency} onChange={e => setBulkAgency(e.target.value)} required>
+                                    <option value="">— Select Agency —</option>
+                                    {agencies.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                                </select>
+                            </div>
+                            
+                            <div className="form-group">
+                                <label>Excel File</label>
+                                <div style={{ 
+                                    border: '2px dashed var(--border-color)', 
+                                    padding: '30px', 
+                                    textAlign: 'center',
+                                    borderRadius: '8px',
+                                    backgroundColor: 'var(--bg-secondary)',
+                                    cursor: 'pointer'
+                                }} onClick={() => fileInputRef.current?.click()}>
+                                    <UploadCloud size={32} style={{ color: 'var(--primary-color)', marginBottom: '10px' }} />
+                                    <div>{bulkFile ? bulkFile.name : 'Click to select Excel file (.xlsx, .xls)'}</div>
+                                    <input 
+                                        type="file" 
+                                        ref={fileInputRef}
+                                        accept=".xlsx, .xls"
+                                        onChange={handleFileChange}
+                                        style={{ display: 'none' }}
+                                        required
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="modal-actions" style={{ marginTop: '20px' }}>
+                                <button type="button" className="btn btn-secondary" onClick={() => setShowBulkForm(false)}>Close</button>
+                                <button type="submit" className="btn btn-primary" disabled={bulkLoading || !bulkFile || !bulkAgency}>
+                                    {bulkLoading ? 'Uploading...' : 'Upload Data'}
+                                </button>
                             </div>
                         </form>
                     </div>

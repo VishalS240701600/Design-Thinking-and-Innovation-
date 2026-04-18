@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
 }
 
 // POST payment (employee only)
+// Supports overpayment spillover: excess is applied to the customer's next unpaid orders
 export async function POST(request: NextRequest) {
     const user = await getAuthUser();
     if (!user || (user.role !== 'EMPLOYEE' && user.role !== 'ADMIN')) {
@@ -65,33 +66,117 @@ export async function POST(request: NextRequest) {
     const totalPaid = order.payments.reduce((sum, p) => sum + p.amount, 0);
     const remainingBalance = order.totalAmount - totalPaid;
 
-    if (parsedAmount > remainingBalance) {
+    // If payment fits within this order, handle simply
+    if (parsedAmount <= remainingBalance) {
+        const payment = await prisma.payment.create({
+            data: {
+                agencyId: user.agencyId,
+                orderId: parsedOrderId,
+                employeeId: user.id,
+                amount: parsedAmount,
+                method: method || 'CASH',
+                notes,
+            },
+            include: {
+                order: { select: { totalAmount: true, customer: { select: { name: true } } } },
+            },
+        });
+
+        // Auto-update order status if fully paid
+        if (totalPaid + parsedAmount >= order.totalAmount && order.status === 'PENDING') {
+            await prisma.order.update({
+                where: { id: parsedOrderId },
+                data: { status: 'COMPLETED' }
+            });
+        }
+
+        return NextResponse.json(payment);
+    }
+
+    // --- Overpayment spillover logic ---
+    // Find all unpaid/partially-paid orders for the same customer, oldest first
+    const customerOrders = await prisma.order.findMany({
+        where: {
+            customerId: order.customerId,
+            agencyId: order.agencyId,
+            status: { not: 'COMPLETED' },
+        },
+        include: { payments: true },
+        orderBy: { createdAt: 'asc' },
+    });
+
+    // Calculate total outstanding across all the customer's orders
+    const totalOutstanding = customerOrders.reduce((sum, o) => {
+        const paid = o.payments.reduce((s, p) => s + p.amount, 0);
+        return sum + (o.totalAmount - paid);
+    }, 0);
+
+    if (parsedAmount > totalOutstanding) {
         return NextResponse.json({
-            error: `Payment amount (₹${parsedAmount}) exceeds remaining balance (₹${remainingBalance})`
+            error: `Payment amount (₹${parsedAmount}) exceeds total outstanding balance across all orders (₹${totalOutstanding.toFixed(2)})`
         }, { status: 400 });
     }
 
-    const payment = await prisma.payment.create({
-        data: {
-            agencyId: user.agencyId,
-            orderId: parsedOrderId,
-            employeeId: user.id,
-            amount: parsedAmount,
-            method: method || 'CASH',
-            notes,
-        },
-        include: {
-            order: { select: { totalAmount: true, customer: { select: { name: true } } } },
-        },
+    // Distribute payment across orders in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+        let remaining = parsedAmount;
+        const createdPayments = [];
+
+        // Ensure the selected order is processed first
+        const sortedOrders = [
+            customerOrders.find(o => o.id === parsedOrderId)!,
+            ...customerOrders.filter(o => o.id !== parsedOrderId),
+        ];
+
+        for (const o of sortedOrders) {
+            if (remaining <= 0) break;
+
+            const paid = o.payments.reduce((s, p) => s + p.amount, 0);
+            const balance = o.totalAmount - paid;
+            if (balance <= 0) continue;
+
+            const applyAmount = Math.min(remaining, balance);
+            remaining = parseFloat((remaining - applyAmount).toFixed(2));
+
+            const payment = await tx.payment.create({
+                data: {
+                    agencyId: user.agencyId,
+                    orderId: o.id,
+                    employeeId: user.id,
+                    amount: applyAmount,
+                    method: method || 'CASH',
+                    notes: notes
+                        ? `${notes} (auto-distributed)`
+                        : `Auto-distributed from payment on Order #${parsedOrderId}`,
+                },
+                include: {
+                    order: { select: { id: true, totalAmount: true, customer: { select: { name: true } } } },
+                },
+            });
+
+            createdPayments.push(payment);
+
+            // Auto-complete order if fully paid
+            if (paid + applyAmount >= o.totalAmount && o.status === 'PENDING') {
+                await tx.order.update({
+                    where: { id: o.id },
+                    data: { status: 'COMPLETED' },
+                });
+            }
+        }
+
+        return createdPayments;
     });
 
-    // Auto-update order status if fully paid
-    if (totalPaid + parsedAmount >= order.totalAmount && order.status === 'PENDING') {
-        await prisma.order.update({
-            where: { id: parsedOrderId },
-            data: { status: 'COMPLETED' }
-        });
-    }
-
-    return NextResponse.json(payment);
+    // Return the first payment (for the selected order) with a spillover summary
+    return NextResponse.json({
+        ...result[0],
+        spillover: result.length > 1,
+        spilloverCount: result.length,
+        spilloverDetails: result.map(p => ({
+            orderId: p.order.id,
+            amount: p.amount,
+            customerName: p.order.customer.name,
+        })),
+    });
 }

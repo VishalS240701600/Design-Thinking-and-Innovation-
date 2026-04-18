@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 
-interface Order { id: number; totalAmount: number; status: string; customer: { name: string }; }
+interface OrderPayment { id: number; amount: number; }
+interface Order { id: number; totalAmount: number; status: string; customer: { id: number; name: string }; payments: OrderPayment[]; }
 interface Payment { id: number; amount: number; method: string; paymentDate: string; order: { id: number; customer: { name: string } }; }
 
 export default function EmployeePayments() {
@@ -12,24 +13,49 @@ export default function EmployeePayments() {
     const [success, setSuccess] = useState('');
     const [error, setError] = useState('');
 
-    useEffect(() => {
+    const loadData = () => {
         fetch('/api/orders').then(r => r.json()).then(setOrders);
         fetch('/api/payments').then(r => r.json()).then(setPayments);
-    }, []);
+    };
+
+    useEffect(() => { loadData(); }, []);
+
+    // Calculate remaining balance for the selected order
+    const selectedOrder = orders.find(o => o.id === parseInt(form.orderId));
+    const selectedPaid = selectedOrder ? selectedOrder.payments.reduce((s, p) => s + p.amount, 0) : 0;
+    const selectedBalance = selectedOrder ? selectedOrder.totalAmount - selectedPaid : 0;
+
+    // Calculate total outstanding for the selected customer
+    const selectedCustomerOrders = selectedOrder
+        ? orders.filter(o => o.customer.id === selectedOrder.customer.id && o.status !== 'COMPLETED')
+        : [];
+    const totalCustomerOutstanding = selectedCustomerOrders.reduce((sum, o) => {
+        const paid = o.payments.reduce((s, p) => s + p.amount, 0);
+        return sum + (o.totalAmount - paid);
+    }, 0);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
+        setSuccess('');
         const res = await fetch('/api/payments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(form),
         });
         if (res.ok) {
-            setSuccess('Payment recorded!');
+            const data = await res.json();
+            if (data.spillover && data.spilloverDetails) {
+                const details = data.spilloverDetails
+                    .map((d: { orderId: number; amount: number }) => `Order #${d.orderId}: ₹${d.amount}`)
+                    .join(', ');
+                setSuccess(`Payment distributed across ${data.spilloverCount} orders — ${details}`);
+            } else {
+                setSuccess('Payment recorded!');
+            }
             setForm({ orderId: '', amount: '', method: 'CASH', notes: '' });
-            fetch('/api/payments').then(r => r.json()).then(setPayments);
-            setTimeout(() => setSuccess(''), 3000);
+            loadData();
+            setTimeout(() => setSuccess(''), 6000);
         } else {
             const data = await res.json();
             setError(data.error || 'Failed to record payment');
@@ -54,13 +80,43 @@ export default function EmployeePayments() {
                             <label>Order</label>
                             <select className="form-control" value={form.orderId} onChange={e => setForm({ ...form, orderId: e.target.value })} required>
                                 <option value="">— Select Order —</option>
-                                {orders.filter(o => o.status !== 'COMPLETED').map(o => (
-                                    <option key={o.id} value={o.id}>
-                                        #{o.id} — {o.customer.name} — ₹{o.totalAmount}
-                                    </option>
-                                ))}
+                                {orders.filter(o => o.status !== 'COMPLETED').map(o => {
+                                    const paid = o.payments.reduce((s, p) => s + p.amount, 0);
+                                    const bal = o.totalAmount - paid;
+                                    return (
+                                        <option key={o.id} value={o.id}>
+                                            #{o.id} — {o.customer.name} — ₹{o.totalAmount} (Balance: ₹{bal.toFixed(2)})
+                                        </option>
+                                    );
+                                })}
                             </select>
                         </div>
+
+                        {selectedOrder && (
+                            <div style={{
+                                padding: '12px',
+                                borderRadius: '8px',
+                                background: 'var(--bg-secondary, #f4f6f8)',
+                                marginBottom: '12px',
+                                fontSize: '0.85rem',
+                                lineHeight: '1.6',
+                            }}>
+                                <div><strong>Order #{selectedOrder.id}</strong> — {selectedOrder.customer.name}</div>
+                                <div>Order Total: <strong>₹{selectedOrder.totalAmount.toFixed(2)}</strong></div>
+                                <div>Already Paid: <strong style={{ color: 'var(--success, #22c55e)' }}>₹{selectedPaid.toFixed(2)}</strong></div>
+                                <div>This Order Balance: <strong style={{ color: 'var(--danger, #ef4444)' }}>₹{selectedBalance.toFixed(2)}</strong></div>
+                                {selectedCustomerOrders.length > 1 && (
+                                    <div style={{ marginTop: '6px', borderTop: '1px solid var(--border, #e2e8f0)', paddingTop: '6px' }}>
+                                        <div>Customer has <strong>{selectedCustomerOrders.length}</strong> unpaid orders</div>
+                                        <div>Total Outstanding: <strong style={{ color: 'var(--warning, #f59e0b)' }}>₹{totalCustomerOutstanding.toFixed(2)}</strong></div>
+                                        <div style={{ fontSize: '0.78rem', opacity: 0.7, marginTop: '4px' }}>
+                                            💡 Excess payment will auto-apply to next orders
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         <div className="form-group">
                             <label>Amount (₹)</label>
                             <input type="number" step="0.01" className="form-control" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />
@@ -108,3 +164,4 @@ export default function EmployeePayments() {
         </>
     );
 }
+

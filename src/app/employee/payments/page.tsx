@@ -12,6 +12,7 @@ export default function EmployeePayments() {
     const [form, setForm] = useState({ orderId: '', amount: '', method: 'CASH', notes: '' });
     const [success, setSuccess] = useState('');
     const [error, setError] = useState('');
+    const [submitting, setSubmitting] = useState(false);
 
     const loadData = () => {
         fetch('/api/orders').then(r => r.json()).then(setOrders);
@@ -36,6 +37,8 @@ export default function EmployeePayments() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (submitting) return; // Prevent double-submit
+        setSubmitting(true);
         setError('');
         setSuccess('');
         const res = await fetch('/api/payments', {
@@ -60,6 +63,7 @@ export default function EmployeePayments() {
             const data = await res.json();
             setError(data.error || 'Failed to record payment');
         }
+        setSubmitting(false);
     };
 
     return (
@@ -133,7 +137,9 @@ export default function EmployeePayments() {
                             <label>Notes</label>
                             <textarea className="form-control" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Optional..." />
                         </div>
-                        <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Record Payment</button>
+                        <button type="submit" className="btn btn-primary" disabled={submitting} style={{ width: '100%', justifyContent: 'center', opacity: submitting ? 0.6 : 1, cursor: submitting ? 'not-allowed' : 'pointer' }}>
+                            {submitting ? '⏳ Recording...' : 'Record Payment'}
+                        </button>
                     </form>
                 </div>
 

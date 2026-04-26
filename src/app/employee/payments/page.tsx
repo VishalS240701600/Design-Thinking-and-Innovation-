@@ -114,7 +114,7 @@ export default function EmployeePayments() {
                                         <div>Customer has <strong>{selectedCustomerOrders.length}</strong> unpaid orders</div>
                                         <div>Total Outstanding: <strong style={{ color: 'var(--warning, #f59e0b)' }}>₹{totalCustomerOutstanding.toFixed(2)}</strong></div>
                                         <div style={{ fontSize: '0.78rem', opacity: 0.7, marginTop: '4px' }}>
-                                            💡 Excess payment will auto-apply to next orders
+                                            💡 Excess payment will auto-apply to smallest balance orders first
                                         </div>
                                     </div>
                                 )}

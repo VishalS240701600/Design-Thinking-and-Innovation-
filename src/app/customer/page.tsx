@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Package, ShoppingCart, Cookie, Beaker, Brush, Milk, Utensils, Croissant, SprayCan, Droplets, Coffee, EggFried } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { Package, ShoppingCart, Cookie, Beaker, Brush, Milk, Utensils, Croissant, SprayCan, Droplets, Coffee, EggFried, LayoutGrid } from 'lucide-react';
 
 interface Product { id: number; name: string; description: string | null; price: number; stock: number; unit: string; category: string | null; }
 interface CartItem { productId: number; name: string; price: number; quantity: number; unit: string; }
@@ -12,10 +12,33 @@ export default function CustomerProducts() {
     const [showCart, setShowCart] = useState(false);
     const [success, setSuccess] = useState('');
     const [error, setError] = useState('');
+    const [selectedCategory, setSelectedCategory] = useState('All');
 
     useEffect(() => {
         fetch('/api/products').then(r => r.json()).then(setProducts);
     }, []);
+
+    // Extract unique categories with counts
+    const categories = useMemo(() => {
+        const catMap = new Map<string, number>();
+        products.forEach(p => {
+            const cat = p.category || 'General';
+            catMap.set(cat, (catMap.get(cat) || 0) + 1);
+        });
+        // Sort alphabetically, but keep 'General' at the end
+        const sorted = Array.from(catMap.entries()).sort((a, b) => {
+            if (a[0] === 'General') return 1;
+            if (b[0] === 'General') return -1;
+            return a[0].localeCompare(b[0]);
+        });
+        return sorted;
+    }, [products]);
+
+    // Filter products by selected category
+    const filteredProducts = useMemo(() => {
+        if (selectedCategory === 'All') return products;
+        return products.filter(p => (p.category || 'General') === selectedCategory);
+    }, [products, selectedCategory]);
 
     const addToCart = (p: Product) => {
         const existing = cart.find(c => c.productId === p.id);
@@ -52,19 +75,19 @@ export default function CustomerProducts() {
         }
     };
 
-    const getCategoryIcon = (cat: string | null) => {
+    const getCategoryIcon = (cat: string | null, size = 40) => {
         switch(cat) {
-            case 'Biscuits': return <Cookie size={40} className="text-muted" color="var(--text-secondary)" />;
-            case 'Staples': return <Beaker size={40} className="text-muted" color="var(--text-secondary)" />;
-            case 'Detergent': return <Brush size={40} className="text-muted" color="var(--text-secondary)" />;
-            case 'Dairy': return <Milk size={40} className="text-muted" color="var(--text-secondary)" />;
-            case 'Noodles': return <Utensils size={40} className="text-muted" color="var(--text-secondary)" />;
-            case 'Bakery': return <Croissant size={40} className="text-muted" color="var(--text-secondary)" />;
-            case 'Personal Care': return <SprayCan size={40} className="text-muted" color="var(--text-secondary)" />;
-            case 'Cleaning': return <Droplets size={40} className="text-muted" color="var(--text-secondary)" />;
-            case 'Beverages': return <Coffee size={40} className="text-muted" color="var(--text-secondary)" />;
-            case 'Cooking Oil': return <EggFried size={40} className="text-muted" color="var(--text-secondary)" />;
-            default: return <Package size={40} className="text-muted" color="var(--text-secondary)" />;
+            case 'Biscuits': return <Cookie size={size} className="text-muted" color="var(--text-secondary)" />;
+            case 'Staples': return <Beaker size={size} className="text-muted" color="var(--text-secondary)" />;
+            case 'Detergent': return <Brush size={size} className="text-muted" color="var(--text-secondary)" />;
+            case 'Dairy': return <Milk size={size} className="text-muted" color="var(--text-secondary)" />;
+            case 'Noodles': return <Utensils size={size} className="text-muted" color="var(--text-secondary)" />;
+            case 'Bakery': return <Croissant size={size} className="text-muted" color="var(--text-secondary)" />;
+            case 'Personal Care': return <SprayCan size={size} className="text-muted" color="var(--text-secondary)" />;
+            case 'Cleaning': return <Droplets size={size} className="text-muted" color="var(--text-secondary)" />;
+            case 'Beverages': return <Coffee size={size} className="text-muted" color="var(--text-secondary)" />;
+            case 'Cooking Oil': return <EggFried size={size} className="text-muted" color="var(--text-secondary)" />;
+            default: return <Package size={size} className="text-muted" color="var(--text-secondary)" />;
         }
     };
 
@@ -81,6 +104,29 @@ export default function CustomerProducts() {
             </div>
 
             {success && <div className="success-msg">{success}</div>}
+
+            {/* Category Filter Bar */}
+            {categories.length > 0 && (
+                <div className="category-bar">
+                    <button
+                        className={`category-chip ${selectedCategory === 'All' ? 'active' : ''}`}
+                        onClick={() => setSelectedCategory('All')}
+                    >
+                        <LayoutGrid size={16} /> All
+                        <span className="chip-count">{products.length}</span>
+                    </button>
+                    {categories.map(([cat, count]) => (
+                        <button
+                            key={cat}
+                            className={`category-chip ${selectedCategory === cat ? 'active' : ''}`}
+                            onClick={() => setSelectedCategory(cat)}
+                        >
+                            {getCategoryIcon(cat, 16)} {cat}
+                            <span className="chip-count">{count}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
 
             {/* Cart Modal */}
             {showCart && (
@@ -121,7 +167,7 @@ export default function CustomerProducts() {
             )}
 
             <div className="product-grid">
-                {products.map(p => (
+                {filteredProducts.map(p => (
                     <div className="product-card" key={p.id}>
                         <div className="product-card-img">
                             {getCategoryIcon(p.category)}
@@ -138,6 +184,12 @@ export default function CustomerProducts() {
                         </div>
                     </div>
                 ))}
+                {filteredProducts.length === 0 && (
+                    <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
+                        <h3>No products found</h3>
+                        <p>No products available in this category</p>
+                    </div>
+                )}
             </div>
         </>
     );

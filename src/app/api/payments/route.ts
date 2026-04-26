@@ -112,24 +112,29 @@ export async function POST(request: NextRequest) {
                 orderBy: { createdAt: 'asc' },
             });
 
-            // Calculate total outstanding
-            const totalOutstanding = customerOrders.reduce((sum, o) => {
+            // Calculate total outstanding and per-order balances
+            const orderBalances = customerOrders.map(o => {
                 const paid = o.payments.reduce((s, p) => s + p.amount, 0);
-                return sum + (o.totalAmount - paid);
-            }, 0);
+                return { order: o, balance: o.totalAmount - paid };
+            });
+            const totalOutstanding = orderBalances.reduce((sum, ob) => sum + ob.balance, 0);
 
             if (parsedAmount > totalOutstanding) {
-                throw new Error(`VALIDATION:Payment amount (₹${parsedAmount}) exceeds total outstanding balance across all orders (₹${totalOutstanding.toFixed(2)})`);
+                throw new Error(`VALIDATION:Invalid amount exceeds existing balance. Payment ₹${parsedAmount} exceeds total outstanding ₹${totalOutstanding.toFixed(2)}`);
             }
 
             let remaining = parsedAmount;
             const createdPayments = [];
             const orderUpdates: Promise<unknown>[] = [];
 
-            // Process selected order first, then the rest by oldest
+            // Process selected order first, then the rest sorted by smallest remaining balance
+            const selectedOB = orderBalances.find(ob => ob.order.id === parsedOrderId)!;
+            const othersSorted = orderBalances
+                .filter(ob => ob.order.id !== parsedOrderId)
+                .sort((a, b) => a.balance - b.balance);
             const sortedOrders = [
-                customerOrders.find(o => o.id === parsedOrderId)!,
-                ...customerOrders.filter(o => o.id !== parsedOrderId),
+                selectedOB.order,
+                ...othersSorted.map(ob => ob.order),
             ];
 
             for (const o of sortedOrders) {

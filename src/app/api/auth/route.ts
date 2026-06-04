@@ -73,7 +73,15 @@ export async function POST(request: NextRequest) {
             const expiresIn = 60 * 60 * 24 * 7 * 1000;
             const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn });
 
-            const response = NextResponse.json({ success: true });
+            // Fetch user data to return to client
+            const userDoc = await adminDb.collection('users').doc(decodedToken.uid).get();
+            const userData = userDoc.exists ? userDoc.data() : {};
+
+            const response = NextResponse.json({
+                success: true,
+                user: { id: decodedToken.uid, ...userData }
+            });
+
             response.cookies.set('session', sessionCookie, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
@@ -81,15 +89,6 @@ export async function POST(request: NextRequest) {
                 maxAge: 60 * 60 * 24 * 7,
                 path: '/',
             });
-
-            // Fetch user data to return to client
-            const userDoc = await adminDb.collection('users').doc(decodedToken.uid).get();
-            if (userDoc.exists) {
-                const userData = userDoc.data();
-                return NextResponse.json({
-                    user: { id: decodedToken.uid, ...userData }
-                });
-            }
 
             return response;
         } catch (error) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { adminDb } from '@/lib/firebase-admin';
 import { getAuthUser } from '@/lib/auth';
 
 export async function GET() {
@@ -8,11 +8,10 @@ export async function GET() {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    const agency = await prisma.agency.findUnique({
-        where: { id: user.agencyId }
-    });
+    const doc = await adminDb.collection('agencies').doc(String(user.agencyId)).get();
+    if (!doc.exists) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    return NextResponse.json(agency);
+    return NextResponse.json({ id: doc.id, ...doc.data() });
 }
 
 export async function POST(request: NextRequest) {
@@ -27,10 +26,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Name and Theme Color are required' }, { status: 400 });
     }
 
-    const agency = await prisma.agency.update({
-        where: { id: user.agencyId },
-        data: { name, themeColor }
+    await adminDb.collection('agencies').doc(String(user.agencyId)).update({
+        name,
+        themeColor
     });
 
-    return NextResponse.json(agency);
+    return NextResponse.json({ id: String(user.agencyId), name, themeColor });
 }

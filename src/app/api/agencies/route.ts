@@ -1,23 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { adminDb } from '@/lib/firebase-admin';
 import { getAuthUser } from '@/lib/auth';
 
 export async function GET() {
     try {
-        const agencies = await prisma.agency.findMany({
-            select: { id: true, name: true, themeColor: true },
-            orderBy: { name: 'asc' }
-        });
+        const snapshot = await adminDb.collection('agencies').orderBy('name', 'asc').get();
+        const agencies = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
         return NextResponse.json(agencies);
-    } catch {
+    } catch (err) {
         return NextResponse.json({ error: 'Failed to fetch agencies' }, { status: 500 });
     }
 }
 
-// POST: Create a new agency (Global Admin only)
 export async function POST(request: NextRequest) {
     const user = await getAuthUser();
-    if (!user || user.role !== 'ADMIN' || user.agencyId !== 0) {
+    if (!user || user.role !== 'ADMIN' || user.agencyId !== '0') {
         return NextResponse.json({ error: 'Only Global Admin can create agencies' }, { status: 403 });
     }
 
@@ -28,25 +28,23 @@ export async function POST(request: NextRequest) {
     }
 
     // Check for duplicate name
-    const existing = await prisma.agency.findUnique({ where: { name: name.trim() } });
-    if (existing) {
+    const existing = await adminDb.collection('agencies').where('name', '==', name.trim()).limit(1).get();
+    if (!existing.empty) {
         return NextResponse.json({ error: 'An agency with this name already exists' }, { status: 409 });
     }
 
-    const agency = await prisma.agency.create({
-        data: {
-            name: name.trim(),
-            themeColor: themeColor || '#0066cc',
-        }
+    const docRef = await adminDb.collection('agencies').add({
+        name: name.trim(),
+        themeColor: themeColor || '#0066cc',
+        createdAt: new Date().toISOString()
     });
 
-    return NextResponse.json(agency, { status: 201 });
+    return NextResponse.json({ id: docRef.id, name: name.trim(), themeColor: themeColor || '#0066cc' }, { status: 201 });
 }
 
-// DELETE: Remove an agency (Global Admin only)
 export async function DELETE(request: NextRequest) {
     const user = await getAuthUser();
-    if (!user || user.role !== 'ADMIN' || user.agencyId !== 0) {
+    if (!user || user.role !== 'ADMIN' || user.agencyId !== '0') {
         return NextResponse.json({ error: 'Only Global Admin can delete agencies' }, { status: 403 });
     }
 
@@ -56,6 +54,6 @@ export async function DELETE(request: NextRequest) {
         return NextResponse.json({ error: 'Agency ID is required' }, { status: 400 });
     }
 
-    await prisma.agency.delete({ where: { id: parseInt(id) } });
+    await adminDb.collection('agencies').doc(id).delete();
     return NextResponse.json({ success: true });
 }

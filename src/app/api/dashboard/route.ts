@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { adminDb } from '@/lib/firebase-admin';
+import * as admin from 'firebase-admin';
 import { getAuthUser } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
@@ -7,48 +8,59 @@ export async function GET(request: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     if (user.role === 'ADMIN') {
-        const [totalProducts, totalCustomers, totalEmployees, totalOrders, orders, payments] = await Promise.all([
-            prisma.product.count(), // Global count
-            prisma.user.count({ where: { role: 'CUSTOMER' } }),
-            prisma.user.count({ where: { role: 'EMPLOYEE' } }),
-            prisma.order.count(),
-            prisma.order.findMany({
-                take: 10,
-                orderBy: { createdAt: 'desc' },
-                include: { customer: { select: { name: true } } },
-            }),
-            prisma.payment.aggregate({ _sum: { amount: true } }),
+        const [
+            productsCount, 
+            customersCount, 
+            employeesCount, 
+            ordersCount, 
+            ordersSnap, 
+            paymentsAgg
+        ] = await Promise.all([
+            adminDb.collection('products').count().get(),
+            adminDb.collection('users').where('role', '==', 'CUSTOMER').count().get(),
+            adminDb.collection('users').where('role', '==', 'EMPLOYEE').count().get(),
+            adminDb.collection('orders').count().get(),
+            adminDb.collection('orders').orderBy('createdAt', 'desc').limit(10).get(),
+            adminDb.collection('payments').aggregate({ totalAmount: admin.firestore.AggregateField.sum('amount') }).get()
         ]);
+
+        const orders = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
         return NextResponse.json({
             stats: {
-                totalProducts,
-                totalCustomers,
-                totalEmployees,
-                totalOrders,
-                totalRevenue: payments._sum.amount || 0,
+                totalProducts: productsCount.data().count,
+                totalCustomers: customersCount.data().count,
+                totalEmployees: employeesCount.data().count,
+                totalOrders: ordersCount.data().count,
+                totalRevenue: paymentsAgg.data().totalAmount || 0,
             },
             recentOrders: orders,
         });
     }
 
     if (user.role === 'EMPLOYEE') {
-        const [myOrders, myPayments] = await Promise.all([
-            prisma.order.count({ where: { employeeId: user.id, agencyId: user.agencyId } }),
-            prisma.payment.aggregate({ where: { employeeId: user.id, agencyId: user.agencyId }, _sum: { amount: true } }),
+        const [myOrdersCount, myPaymentsAgg] = await Promise.all([
+            adminDb.collection('orders').where('employeeId', '==', user.id).where('agencyId', '==', user.agencyId).count().get(),
+            adminDb.collection('payments').where('employeeId', '==', user.id).where('agencyId', '==', user.agencyId).aggregate({ totalAmount: admin.firestore.AggregateField.sum('amount') }).get(),
         ]);
         return NextResponse.json({
-            stats: { myOrders, myPaymentsTotal: myPayments._sum.amount || 0 },
+            stats: { 
+                myOrders: myOrdersCount.data().count, 
+                myPaymentsTotal: myPaymentsAgg.data().totalAmount || 0 
+            },
         });
     }
 
     if (user.role === 'CUSTOMER') {
-        const [myOrders, pendingOrders] = await Promise.all([
-            prisma.order.count({ where: { customerId: user.id, agencyId: user.agencyId } }),
-            prisma.order.count({ where: { customerId: user.id, status: 'PENDING', agencyId: user.agencyId } }),
+        const [myOrdersCount, pendingOrdersCount] = await Promise.all([
+            adminDb.collection('orders').where('customerId', '==', user.id).where('agencyId', '==', user.agencyId).count().get(),
+            adminDb.collection('orders').where('customerId', '==', user.id).where('status', '==', 'PENDING').where('agencyId', '==', user.agencyId).count().get(),
         ]);
         return NextResponse.json({
-            stats: { myOrders, pendingOrders },
+            stats: { 
+                myOrders: myOrdersCount.data().count, 
+                pendingOrders: pendingOrdersCount.data().count 
+            },
         });
     }
 

@@ -1,17 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { adminDb } from '@/lib/firebase-admin';
 import { getAuthUser } from '@/lib/auth';
 
 export async function GET() {
     const user = await getAuthUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const products = await prisma.product.findMany({
-        where: user.role === 'ADMIN' ? undefined : { agencyId: user.agencyId },
-        orderBy: { createdAt: 'desc' },
-        include: user.role === 'ADMIN' ? { agency: { select: { name: true } } } : undefined
-    });
-    return NextResponse.json(products);
+    try {
+        let productsRef: FirebaseFirestore.Query = adminDb.collection('products');
+        
+        if (user.role !== 'ADMIN') {
+            productsRef = productsRef.where('agencyId', '==', user.agencyId);
+        }
+
+        const snapshot = await productsRef.orderBy('createdAt', 'desc').get();
+        let products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        if (user.role === 'ADMIN') {
+            const agenciesSnapshot = await adminDb.collection('agencies').get();
+            const agenciesMap = new Map();
+            agenciesSnapshot.forEach(doc => agenciesMap.set(doc.id, doc.data()));
+
+            products = products.map(p => ({
+                ...p,
+                agency: { name: agenciesMap.get((p as any).agencyId)?.name || 'Unknown' }
+            }));
+        }
+
+        return NextResponse.json(products);
+    } catch (error) {
+        console.error(error);
+        return NextResponse.json({ error: 'Failed to fetch products' }, { status: 500 });
+    }
 }
 
 export async function POST(request: NextRequest) {
@@ -24,18 +44,29 @@ export async function POST(request: NextRequest) {
 
     if (!id && !agencyId) return NextResponse.json({ error: 'Agency selection is required' }, { status: 400 });
 
-    if (id) {
-        // Global Admins can update any product, optionally we could check existence
-        const product = await prisma.product.update({
-            where: { id },
-            data: { name, description, price: parseFloat(price), stock: parseInt(stock), unit, category, agencyId: agencyId ? parseInt(agencyId) : undefined },
-        });
-        return NextResponse.json(product);
-    } else {
-        const product = await prisma.product.create({
-            data: { agencyId: parseInt(agencyId), name, description, price: parseFloat(price), stock: parseInt(stock) || 0, unit: unit || 'pcs', category },
-        });
-        return NextResponse.json(product);
+    try {
+        if (id) {
+            const updateData: any = { name, description, price: parseFloat(price), stock: parseInt(stock), unit, category };
+            if (agencyId) updateData.agencyId = String(agencyId);
+
+            await adminDb.collection('products').doc(id).update(updateData);
+            return NextResponse.json({ id, ...updateData });
+        } else {
+            const newProduct = {
+                agencyId: String(agencyId),
+                name,
+                description: description || null,
+                price: parseFloat(price),
+                stock: parseInt(stock) || 0,
+                unit: unit || 'pcs',
+                category: category || null,
+                createdAt: new Date().toISOString()
+            };
+            const docRef = await adminDb.collection('products').add(newProduct);
+            return NextResponse.json({ id: docRef.id, ...newProduct });
+        }
+    } catch (error) {
+        return NextResponse.json({ error: 'Failed to save product' }, { status: 500 });
     }
 }
 
@@ -47,11 +78,6 @@ export async function DELETE(request: NextRequest) {
     const id = searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
 
-    const parsedId = parseInt(id);
-
-    // Global Admin can delete any product
-    await prisma.product.deleteMany({
-        where: { id: parsedId }
-    });
+    await adminDb.collection('products').doc(id).delete();
     return NextResponse.json({ success: true });
 }

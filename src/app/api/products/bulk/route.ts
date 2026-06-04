@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { adminDb } from '@/lib/firebase-admin';
 import { getAuthUser } from '@/lib/auth';
 import * as XLSX from 'xlsx';
 
@@ -29,29 +29,18 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Agency selection is required' }, { status: 400 });
         }
 
-        // Read the Excel file
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
 
-        // Convert to array of arrays (raw rows)
         const rawRows: (string | number | null | undefined)[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-        // Parse the Excel format:
-        // Row 0: Title row "OPENING STOCK STATEMENT..."
-        // Row 1: Header row: Particulars, Unit, MRP Sl.No, Stock, Free, Cost Rs., Value
-        // Data rows: category headers (bold, no stock/price) and product rows
-        //
-        // Category rows: only have text in the first column, no numeric values in Stock/Cost columns
-        // Product rows: have Particulars, Unit, Stock, Cost Rs.
 
         const products: ParsedProduct[] = [];
         let currentCategory = '';
         let skippedRows = 0;
         let headerRowIndex = -1;
 
-        // Find the header row by looking for "Particulars" or "Stock"
         for (let i = 0; i < Math.min(rawRows.length, 5); i++) {
             const row = rawRows[i];
             if (!row) continue;
@@ -62,10 +51,8 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // If no header found, assume row 1 is header (row 0 is title)
         if (headerRowIndex === -1) headerRowIndex = 1;
 
-        // Determine column indices from header row
         const headerRow = rawRows[headerRowIndex] || [];
         let colParticulars = 0;
         let colUnit = 1;
@@ -80,11 +67,9 @@ export async function POST(request: NextRequest) {
             else if (h.includes('cost')) colCost = c;
         }
 
-        // Fallback: if Stock/Cost columns weren't found by name, use positional defaults
-        if (colStock === -1) colStock = 3; // 4th column
-        if (colCost === -1) colCost = 5;   // 6th column
+        if (colStock === -1) colStock = 3;
+        if (colCost === -1) colCost = 5;
 
-        // Process data rows (after header)
         for (let i = headerRowIndex + 1; i < rawRows.length; i++) {
             const row = rawRows[i];
             if (!row || row.length === 0) continue;
@@ -96,18 +81,14 @@ export async function POST(request: NextRequest) {
             const stockVal = row[colStock];
             const costVal = row[colCost];
 
-            // Determine if this is a category header or a product row
-            // Category rows: typically have a name but NO stock and NO cost values
             const hasStock = stockVal !== undefined && stockVal !== null && stockVal !== '' && !isNaN(Number(stockVal));
             const hasCost = costVal !== undefined && costVal !== null && costVal !== '' && !isNaN(Number(costVal));
 
             if (!hasStock && !hasCost) {
-                // This is a category header row
                 currentCategory = name;
                 continue;
             }
 
-            // This is a product row
             const stock = hasStock ? Math.round(Number(stockVal)) : 0;
             const price = hasCost ? Number(Number(costVal).toFixed(2)) : 0;
 
@@ -132,23 +113,40 @@ export async function POST(request: NextRequest) {
             }, { status: 400 });
         }
 
-        // Bulk create products in database
-        const parsedAgencyId = parseInt(agencyId);
-        const created = await prisma.product.createMany({
-            data: products.map(p => ({
-                agencyId: parsedAgencyId,
+        // Firestore batch write (max 500 per batch)
+        const batches = [];
+        let currentBatch = adminDb.batch();
+        let count = 0;
+
+        for (const p of products) {
+            const docRef = adminDb.collection('products').doc();
+            currentBatch.set(docRef, {
+                agencyId: String(agencyId),
                 name: p.name,
                 price: p.price,
                 stock: p.stock,
                 unit: p.unit,
                 category: p.category,
-            })),
-            skipDuplicates: true,
-        });
+                createdAt: new Date().toISOString()
+            });
+
+            count++;
+            if (count === 500) {
+                batches.push(currentBatch.commit());
+                currentBatch = adminDb.batch();
+                count = 0;
+            }
+        }
+
+        if (count > 0) {
+            batches.push(currentBatch.commit());
+        }
+
+        await Promise.all(batches);
 
         return NextResponse.json({
             success: true,
-            imported: created.count,
+            imported: products.length,
             total: products.length,
             skippedRows,
             categories: [...new Set(products.map(p => p.category))],

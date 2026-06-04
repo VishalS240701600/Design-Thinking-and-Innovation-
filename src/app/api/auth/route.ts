@@ -1,23 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
-import { hashPassword, verifyPassword, generateToken } from '@/lib/auth';
+import { adminAuth, adminDb } from '@/lib/firebase-admin';
 
 export async function POST(request: NextRequest) {
     const body = await request.json();
-    const { action, name, email, password, role, agencyId } = body;
+    const { action, name, email, password, role, agencyId, idToken } = body;
 
     if (action === 'register') {
         if (!name || !email || !password || !agencyId) {
             return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
         }
 
-        const parsedAgencyId = parseInt(agencyId);
-        const existing = await prisma.user.findUnique({
-            where: { email_agencyId: { email, agencyId: parsedAgencyId } }
-        });
-
-        if (existing) {
-            return NextResponse.json({ error: 'Email already registered in this agency' }, { status: 400 });
+        const agencyIdStr = String(agencyId);
+        
+        // Check if email exists in this agency (we allow same email in different agencies? Firebase Auth requires globally unique emails unless we use identity platform multitenancy, but let's assume globally unique for simplicity)
+        try {
+            await adminAuth.getUserByEmail(email);
+            return NextResponse.json({ error: 'Email already registered' }, { status: 400 });
+        } catch (e: any) {
+            // User does not exist, we can proceed
+            if (e.code !== 'auth/user-not-found') {
+                return NextResponse.json({ error: 'Error checking user' }, { status: 500 });
+            }
         }
 
         if (role && role.toUpperCase() === 'ADMIN') {
@@ -26,107 +29,115 @@ export async function POST(request: NextRequest) {
 
         const validRole = role && ['CUSTOMER', 'EMPLOYEE'].includes(role.toUpperCase()) ? role.toUpperCase() : 'CUSTOMER';
 
-        const hashed = await hashPassword(password);
-        const user = await prisma.user.create({
-            data: {
-                agencyId: parsedAgencyId,
+        try {
+            const userRecord = await adminAuth.createUser({
+                email,
+                password,
+                displayName: name,
+            });
+
+            // Set custom claims (optional, but good for security rules)
+            await adminAuth.setCustomUserClaims(userRecord.uid, { role: validRole, agencyId: agencyIdStr });
+
+            // Store user in Firestore
+            await adminDb.collection('users').doc(userRecord.uid).set({
+                agencyId: agencyIdStr,
                 name,
                 email,
-                password: hashed,
                 role: validRole,
-            },
-            include: { agency: true }
-        });
+                createdAt: new Date().toISOString()
+            });
 
-        const token = generateToken({
-            id: user.id,
-            agencyId: user.agencyId || 0,
-            themeColor: user.agency?.themeColor || '#0066cc',
-            name: user.name,
-            email: user.email,
-            role: user.role
-        });
-
-        const response = NextResponse.json({
-            user: { id: user.id, agencyId: user.agencyId, name: user.name, email: user.email, role: user.role },
-        });
-        response.cookies.set('auth-token', token, {
-            httpOnly: true,
-            secure: false,
-            sameSite: 'lax',
-            maxAge: 60 * 60 * 24 * 7,
-            path: '/',
-        });
-
-        return response;
+            // We cannot automatically sign them in server-side with Firebase Admin.
+            // The client will need to sign in using the Firebase Client SDK.
+            return NextResponse.json({
+                success: true,
+                message: 'Registration successful. Please log in.',
+                user: { id: userRecord.uid, agencyId: agencyIdStr, name, email, role: validRole },
+            });
+        } catch (error: any) {
+            return NextResponse.json({ error: error.message }, { status: 500 });
+        }
     }
 
-    if (action === 'login') {
-        if (!email || !password) {
-            return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
+    if (action === 'session') {
+        if (!idToken) {
+            return NextResponse.json({ error: 'ID token is required' }, { status: 400 });
         }
 
-        let user;
-        if (agencyId) {
-            const parsedAgencyId = parseInt(agencyId);
-            user = await prisma.user.findUnique({
-                where: { email_agencyId: { email, agencyId: parsedAgencyId } },
-                include: { agency: true }
+        try {
+            // Verify the ID token and get the UID
+            const decodedToken = await adminAuth.verifyIdToken(idToken);
+            
+            // Create a session cookie (expires in 7 days)
+            const expiresIn = 60 * 60 * 24 * 7 * 1000;
+            const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn });
+
+            const response = NextResponse.json({ success: true });
+            response.cookies.set('session', sessionCookie, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax',
+                maxAge: 60 * 60 * 24 * 7,
+                path: '/',
             });
-        } else {
-            // Global Admin Login
-            user = await prisma.user.findFirst({
-                where: { email, role: 'ADMIN' },
-                include: { agency: true }
-            });
+
+            // Fetch user data to return to client
+            const userDoc = await adminDb.collection('users').doc(decodedToken.uid).get();
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                return NextResponse.json({
+                    user: { id: decodedToken.uid, ...userData }
+                });
+            }
+
+            return response;
+        } catch (error) {
+            return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
         }
-
-        if (!user) {
-            return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-        }
-
-        const valid = await verifyPassword(password, user.password);
-        if (!valid) {
-            return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-        }
-
-        const token = generateToken({
-            id: user.id,
-            agencyId: user.agencyId || 0, // 0 or whatever your token logic expects for null
-            themeColor: user.agency?.themeColor || '#0066cc',
-            name: user.name,
-            email: user.email,
-            role: user.role
-        });
-
-        const response = NextResponse.json({
-            user: { id: user.id, agencyId: user.agencyId, name: user.name, email: user.email, role: user.role },
-        });
-        response.cookies.set('auth-token', token, {
-            httpOnly: true,
-            secure: false,
-            sameSite: 'lax',
-            maxAge: 60 * 60 * 24 * 7,
-            path: '/',
-        });
-
-        return response;
     }
 
     if (action === 'logout') {
         const response = NextResponse.json({ success: true });
-        response.cookies.delete('auth-token');
+        response.cookies.delete('session');
         return response;
     }
 
     if (action === 'me') {
-        const token = request.cookies.get('auth-token')?.value;
-        if (!token) {
+        const sessionCookie = request.cookies.get('session')?.value;
+        if (!sessionCookie) {
             return NextResponse.json({ user: null });
         }
-        const { verifyToken } = await import('@/lib/auth');
-        const authUser = verifyToken(token);
-        return NextResponse.json({ user: authUser });
+        
+        try {
+            const decodedClaims = await adminAuth.verifySessionCookie(sessionCookie, true);
+            const userDoc = await adminDb.collection('users').doc(decodedClaims.uid).get();
+
+            if (!userDoc.exists) return NextResponse.json({ user: null });
+
+            const userData = userDoc.data();
+            
+            let themeColor = '#006591';
+            if (userData?.agencyId && userData.agencyId !== '0') {
+                const agencyDoc = await adminDb.collection('agencies').doc(userData.agencyId).get();
+                if (agencyDoc.exists) {
+                    themeColor = agencyDoc.data()?.themeColor || themeColor;
+                }
+            }
+
+            return NextResponse.json({
+                user: {
+                    id: decodedClaims.uid,
+                    agencyId: userData?.agencyId,
+                    themeColor,
+                    name: userData?.name,
+                    email: userData?.email,
+                    role: userData?.role,
+                }
+            });
+        } catch (error) {
+            return NextResponse.json({ user: null });
+        }
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });

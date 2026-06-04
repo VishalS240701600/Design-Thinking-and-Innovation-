@@ -1,193 +1,280 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
-import { Package, ShoppingCart, Cookie, Beaker, Brush, Milk, Utensils, Croissant, SprayCan, Droplets, Coffee, EggFried, LayoutGrid } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
-interface Product { id: number; name: string; description: string | null; price: number; stock: number; unit: string; category: string | null; }
-interface CartItem { productId: number; name: string; price: number; quantity: number; unit: string; }
+interface Product {
+    id: number;
+    name: string;
+    category: string;
+    price: number;
+    stock: number;
+}
 
-export default function CustomerProducts() {
+interface CartItem {
+    product: Product;
+    quantity: number;
+}
+
+const CATEGORY_ICONS: Record<string, { icon: string; gradient: string }> = {
+    'Biscuits':     { icon: 'cookie',       gradient: 'from-amber-400 to-orange-500' },
+    'Dairy':        { icon: 'water_drop',   gradient: 'from-sky-400 to-blue-500' },
+    'Beverages':    { icon: 'local_cafe',   gradient: 'from-teal-500 to-cyan-600' },
+    'Staples':      { icon: 'grain',        gradient: 'from-yellow-500 to-amber-600' },
+    'Noodles':      { icon: 'ramen_dining', gradient: 'from-red-400 to-rose-500' },
+    'Confectionery':{ icon: 'cake',         gradient: 'from-pink-400 to-rose-400' },
+    'DEFAULT':      { icon: 'inventory_2',  gradient: 'from-slate-400 to-slate-500' },
+};
+
+export default function CustomerCatalogPage() {
     const [products, setProducts] = useState<Product[]>([]);
+    const [categories, setCategories] = useState<string[]>([]);
+    const [activeCategory, setActiveCategory] = useState<string>('All');
     const [cart, setCart] = useState<CartItem[]>([]);
-    const [showCart, setShowCart] = useState(false);
-    const [success, setSuccess] = useState('');
-    const [error, setError] = useState('');
-    const [selectedCategory, setSelectedCategory] = useState('All');
+    const [cartOpen, setCartOpen] = useState(false);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetch('/api/products').then(r => r.json()).then(setProducts);
+        fetch('/api/products')
+            .then(res => res.json())
+            .then((data: Product[]) => {
+                setProducts(data);
+                const cats = ['All', ...Array.from(new Set(data.map((p: Product) => p.category)))];
+                setCategories(cats);
+                setLoading(false);
+            })
+            .catch(() => setLoading(false));
     }, []);
 
-    // Extract unique categories with counts
-    const categories = useMemo(() => {
-        const catMap = new Map<string, number>();
-        products.forEach(p => {
-            const cat = p.category || 'General';
-            catMap.set(cat, (catMap.get(cat) || 0) + 1);
-        });
-        // Sort alphabetically, but keep 'General' at the end
-        const sorted = Array.from(catMap.entries()).sort((a, b) => {
-            if (a[0] === 'General') return 1;
-            if (b[0] === 'General') return -1;
-            return a[0].localeCompare(b[0]);
-        });
-        return sorted;
-    }, [products]);
+    const filtered = activeCategory === 'All' ? products : products.filter(p => p.category === activeCategory);
 
-    // Filter products by selected category
-    const filteredProducts = useMemo(() => {
-        if (selectedCategory === 'All') return products;
-        return products.filter(p => (p.category || 'General') === selectedCategory);
-    }, [products, selectedCategory]);
-
-    const addToCart = (p: Product) => {
-        const existing = cart.find(c => c.productId === p.id);
-        if (existing) {
-            setCart(cart.map(c => c.productId === p.id ? { ...c, quantity: c.quantity + 1 } : c));
-        } else {
-            setCart([...cart, { productId: p.id, name: p.name, price: p.price, quantity: 1, unit: p.unit }]);
-        }
+    const addToCart = (product: Product) => {
+        setCart(prev => {
+            const existing = prev.find(i => i.product.id === product.id);
+            if (existing) return prev.map(i => i.product.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+            return [...prev, { product, quantity: 1 }];
+        });
     };
 
-    const updateQty = (productId: number, qty: number) => {
-        if (qty <= 0) { setCart(cart.filter(c => c.productId !== productId)); return; }
-        setCart(cart.map(c => c.productId === productId ? { ...c, quantity: qty } : c));
+    const updateQty = (productId: number, delta: number) => {
+        setCart(prev => prev
+            .map(i => i.product.id === productId ? { ...i, quantity: i.quantity + delta } : i)
+            .filter(i => i.quantity > 0)
+        );
     };
 
-    const total = cart.reduce((s, c) => s + c.price * c.quantity, 0);
-    const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
+    const removeFromCart = (productId: number) => setCart(prev => prev.filter(i => i.product.id !== productId));
+
+    const cartTotal = cart.reduce((sum, i) => sum + i.product.price * i.quantity, 0);
+    const totalItems = cart.reduce((sum, i) => sum + i.quantity, 0);
+    const logisticsFee = cartTotal > 0 ? 45 : 0;
 
     const placeOrder = async () => {
-        setError('');
-        const res = await fetch('/api/orders', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items: cart.map(c => ({ productId: c.productId, quantity: c.quantity })) }),
-        });
-        if (res.ok) {
-            setSuccess('Order placed successfully!');
-            setCart([]);
-            setShowCart(false);
-            setTimeout(() => setSuccess(''), 4000);
-        } else {
-            const data = await res.json();
-            setError(data.error || 'Failed to place order');
-        }
-    };
-
-    const getCategoryIcon = (cat: string | null, size = 40) => {
-        switch(cat) {
-            case 'Biscuits': return <Cookie size={size} className="text-muted" color="var(--text-secondary)" />;
-            case 'Staples': return <Beaker size={size} className="text-muted" color="var(--text-secondary)" />;
-            case 'Detergent': return <Brush size={size} className="text-muted" color="var(--text-secondary)" />;
-            case 'Dairy': return <Milk size={size} className="text-muted" color="var(--text-secondary)" />;
-            case 'Noodles': return <Utensils size={size} className="text-muted" color="var(--text-secondary)" />;
-            case 'Bakery': return <Croissant size={size} className="text-muted" color="var(--text-secondary)" />;
-            case 'Personal Care': return <SprayCan size={size} className="text-muted" color="var(--text-secondary)" />;
-            case 'Cleaning': return <Droplets size={size} className="text-muted" color="var(--text-secondary)" />;
-            case 'Beverages': return <Coffee size={size} className="text-muted" color="var(--text-secondary)" />;
-            case 'Cooking Oil': return <EggFried size={size} className="text-muted" color="var(--text-secondary)" />;
-            default: return <Package size={size} className="text-muted" color="var(--text-secondary)" />;
-        }
+        if (cart.length === 0) return;
+        try {
+            const res = await fetch('/api/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity, unitPrice: i.product.price })) }),
+            });
+            if (res.ok) {
+                setCart([]);
+                setCartOpen(false);
+                alert('Order placed successfully!');
+            } else {
+                alert('Failed to place order. Please try again.');
+            }
+        } catch { alert('Network error. Please try again.'); }
     };
 
     return (
         <>
-            <div className="page-header flex-between">
-                <div>
-                    <h1>Product Catalog</h1>
-                    <p>Browse and order products</p>
-                </div>
-                <button className="btn btn-primary" onClick={() => setShowCart(true)}>
-                    <ShoppingCart size={18} /> Cart ({cartCount})
-                </button>
+            {/* Page Header */}
+            <div className="mt-lg mb-xl flex flex-col gap-xs">
+                <h1 className="font-headline text-headline-md text-on-surface">Product Catalog</h1>
+                <p className="text-on-surface-variant text-body-md">Browse and order from your distributor&apos;s premium inventory.</p>
             </div>
 
-            {success && <div className="success-msg">{success}</div>}
-
-            {/* Category Filter Bar */}
-            {categories.length > 0 && (
-                <div className="category-bar">
+            {/* Category Filter Pills */}
+            <div className="flex items-center gap-sm mb-xl overflow-x-auto pb-2 scrollbar-hide">
+                {(loading ? ['All', 'Biscuits', 'Dairy', 'Beverages', 'Staples'] : categories).map(cat => (
                     <button
-                        className={`category-chip ${selectedCategory === 'All' ? 'active' : ''}`}
-                        onClick={() => setSelectedCategory('All')}
+                        key={cat}
+                        onClick={() => setActiveCategory(cat)}
+                        className={`px-xl py-base rounded-full text-label-lg font-label whitespace-nowrap transition-all ${
+                            activeCategory === cat
+                                ? 'bg-primary-container text-on-primary-container shadow-md'
+                                : 'bg-surface-container-high text-on-surface-variant hover:bg-primary/10 hover:text-primary'
+                        }`}
                     >
-                        <LayoutGrid size={16} /> All
-                        <span className="chip-count">{products.length}</span>
+                        {cat}
                     </button>
-                    {categories.map(([cat, count]) => (
-                        <button
-                            key={cat}
-                            className={`category-chip ${selectedCategory === cat ? 'active' : ''}`}
-                            onClick={() => setSelectedCategory(cat)}
-                        >
-                            {getCategoryIcon(cat, 16)} {cat}
-                            <span className="chip-count">{count}</span>
-                        </button>
+                ))}
+            </div>
+
+            {/* Product Grid */}
+            {loading ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-xl">
+                    {[...Array(8)].map((_, i) => (
+                        <div key={i} className="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden animate-pulse">
+                            <div className="h-40 bg-surface-container-high" />
+                            <div className="p-lg space-y-3">
+                                <div className="h-4 bg-surface-container-high rounded w-3/4" />
+                                <div className="h-3 bg-surface-container-high rounded w-1/2" />
+                                <div className="h-10 bg-surface-container-high rounded" />
+                            </div>
+                        </div>
                     ))}
                 </div>
-            )}
-
-            {/* Cart Modal */}
-            {showCart && (
-                <div className="modal-overlay" onClick={() => setShowCart(false)}>
-                    <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
-                        <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><ShoppingCart size={24} /> Your Cart</h2>
-                        {error && <div className="error-msg">{error}</div>}
-                        {cart.length === 0 ? (
-                            <div className="empty-state"><p>Your cart is empty</p></div>
-                        ) : (
-                            <>
-                                {cart.map(item => (
-                                    <div key={item.productId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                                        <div>
-                                            <div style={{ fontWeight: 500 }}>{item.name}</div>
-                                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>₹{item.price} × {item.quantity} = ₹{(item.price * item.quantity).toLocaleString()}</div>
-                                        </div>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                            <button className="btn btn-secondary btn-sm" onClick={() => updateQty(item.productId, item.quantity - 1)}>−</button>
-                                            <span>{item.quantity}</span>
-                                            <button className="btn btn-secondary btn-sm" onClick={() => updateQty(item.productId, item.quantity + 1)}>+</button>
-                                        </div>
+            ) : filtered.length === 0 ? (
+                <div className="py-24 text-center text-on-surface-variant">
+                    <span className="material-symbols-outlined text-[64px] opacity-30 block mb-4">inventory_2</span>
+                    <p className="font-headline text-headline-sm">No products found</p>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-xl">
+                    {filtered.map(product => {
+                        const catStyle = CATEGORY_ICONS[product.category] ?? CATEGORY_ICONS.DEFAULT;
+                        const inCart = cart.find(i => i.product.id === product.id);
+                        const isLowStock = product.stock > 0 && product.stock < 20;
+                        const outOfStock = product.stock === 0;
+                        return (
+                            <div key={product.id} className="bg-surface-container-lowest rounded-xl shadow-card border border-outline-variant hover:shadow-card-hover transition-all group overflow-hidden">
+                                {/* Image Area */}
+                                <div className={`h-40 w-full bg-gradient-to-br ${catStyle.gradient} flex items-center justify-center relative`}>
+                                    <span className={`material-symbols-outlined text-[64px] text-white opacity-40 group-hover:scale-110 transition-transform`} style={{ fontVariationSettings: "'FILL' 1" }}>
+                                        {catStyle.icon}
+                                    </span>
+                                    <div className="absolute top-md right-md bg-white/20 backdrop-blur-md px-sm py-xs rounded-lg text-white text-label-sm font-label font-semibold">
+                                        {product.category}
                                     </div>
-                                ))}
-                                <div style={{ marginTop: '16px', textAlign: 'right', fontSize: '1.15rem', fontWeight: 700 }}>
-                                    Total: ₹{total.toLocaleString()}
                                 </div>
-                                <button className="btn btn-success" style={{ width: '100%', marginTop: '12px', justifyContent: 'center' }} onClick={placeOrder}>
-                                    Place Order
-                                </button>
-                            </>
-                        )}
-                        <div className="modal-actions">
-                            <button className="btn btn-secondary" onClick={() => setShowCart(false)}>Close</button>
-                        </div>
-                    </div>
+                                {/* Body */}
+                                <div className="p-lg flex flex-col gap-base">
+                                    <div className="flex justify-between items-start gap-2">
+                                        <h3 className="text-label-lg font-label font-semibold text-on-surface group-hover:text-primary transition-colors line-clamp-2">{product.name}</h3>
+                                        <span className={`flex-shrink-0 px-2 py-1 rounded-full text-[10px] font-bold ${outOfStock ? 'bg-error/10 text-error' : isLowStock ? 'bg-amber-100 text-amber-800' : 'bg-tertiary/10 text-tertiary'}`}>
+                                            {outOfStock ? 'Out of Stock' : isLowStock ? 'Low Stock' : 'In Stock'}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-baseline gap-xs">
+                                        <span className="font-headline text-headline-sm font-semibold text-on-surface">₹{product.price.toLocaleString()}</span>
+                                        <span className="text-on-surface-variant text-[12px]">/ unit</span>
+                                    </div>
+                                    {inCart ? (
+                                        <div className="mt-md flex items-center justify-between border border-outline-variant rounded-lg px-md py-sm">
+                                            <button onClick={() => updateQty(product.id, -1)} className="text-primary hover:text-primary-container transition-colors">
+                                                <span className="material-symbols-outlined text-[20px]">remove</span>
+                                            </button>
+                                            <span className="text-label-lg font-label font-semibold w-8 text-center">{inCart.quantity}</span>
+                                            <button onClick={() => updateQty(product.id, 1)} className="text-primary hover:text-primary-container transition-colors">
+                                                <span className="material-symbols-outlined text-[20px]">add</span>
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <button
+                                            disabled={outOfStock}
+                                            onClick={() => addToCart(product)}
+                                            className="mt-md w-full bg-primary-container text-on-primary-container py-base rounded-lg text-label-lg font-label font-semibold hover:bg-primary-container/90 active:scale-95 transition-all flex items-center justify-center gap-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <span className="material-symbols-outlined text-[20px]">add_shopping_cart</span>
+                                            Add to Cart
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
                 </div>
             )}
 
-            <div className="product-grid">
-                {filteredProducts.map(p => (
-                    <div className="product-card" key={p.id}>
-                        <div className="product-card-img">
-                            {getCategoryIcon(p.category)}
-                        </div>
-                        <div className="product-card-body">
-                            <div className="category">{p.category || 'General'}</div>
-                            <h3>{p.name}</h3>
-                            {p.description && <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px' }}>{p.description}</p>}
-                            <div className="price">₹{p.price} <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 400 }}>/ {p.unit}</span></div>
-                            <div className="stock">{p.stock > 0 ? `${p.stock} in stock` : 'Out of stock'}</div>
-                            <button className="btn btn-primary btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => addToCart(p)} disabled={p.stock <= 0}>
-                                Add to Cart
-                            </button>
-                        </div>
+            {/* Cart Drawer Overlay */}
+            <div
+                className={`fixed inset-0 bg-inverse-surface/40 backdrop-blur-sm transition-opacity z-[60] ${cartOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                onClick={() => setCartOpen(false)}
+            />
+
+            {/* Floating Cart Button */}
+            {totalItems > 0 && !cartOpen && (
+                <button
+                    onClick={() => setCartOpen(true)}
+                    className="fixed bottom-8 right-8 bg-primary text-on-primary px-xl py-md rounded-full shadow-xl flex items-center gap-md hover:bg-primary/90 transition-all hover:scale-105 z-50"
+                >
+                    <span className="material-symbols-outlined">shopping_cart</span>
+                    <span className="text-label-lg font-label font-semibold">{totalItems} items — ₹{cartTotal.toLocaleString()}</span>
+                </button>
+            )}
+
+            {/* Cart Drawer */}
+            <div className={`fixed top-0 right-0 h-full w-[400px] bg-surface-container-lowest shadow-2xl z-[70] transform transition-transform duration-300 flex flex-col ${cartOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+                <div className="p-xl border-b border-outline-variant flex justify-between items-center bg-surface">
+                    <div className="flex items-center gap-md">
+                        <span className="material-symbols-outlined text-primary">shopping_basket</span>
+                        <h2 className="font-headline text-headline-sm">My Cart</h2>
                     </div>
-                ))}
-                {filteredProducts.length === 0 && (
-                    <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
-                        <h3>No products found</h3>
-                        <p>No products available in this category</p>
+                    <button className="p-sm hover:bg-surface-container-high rounded-full transition-colors" onClick={() => setCartOpen(false)}>
+                        <span className="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+
+                <div className="flex-grow overflow-y-auto p-xl flex flex-col gap-lg">
+                    {cart.length === 0 ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-on-surface-variant py-12">
+                            <span className="material-symbols-outlined text-[64px] opacity-30 mb-4">shopping_cart</span>
+                            <p className="font-headline text-headline-sm">Cart is empty</p>
+                            <p className="text-body-sm mt-1">Add products to get started</p>
+                        </div>
+                    ) : cart.map(item => (
+                        <div key={item.product.id} className="flex gap-md border-b border-outline-variant pb-lg">
+                            <div className="w-16 h-16 bg-surface-container rounded-lg flex items-center justify-center flex-shrink-0">
+                                <span className="material-symbols-outlined text-on-surface-variant">{CATEGORY_ICONS[item.product.category]?.icon ?? 'inventory_2'}</span>
+                            </div>
+                            <div className="flex-grow flex flex-col gap-xs">
+                                <div className="flex justify-between">
+                                    <span className="text-label-lg font-label font-semibold text-on-surface">{item.product.name}</span>
+                                    <button className="text-error opacity-60 hover:opacity-100 transition-opacity" onClick={() => removeFromCart(item.product.id)}>
+                                        <span className="material-symbols-outlined text-[18px]">delete</span>
+                                    </button>
+                                </div>
+                                <div className="flex justify-between items-center mt-sm">
+                                    <div className="flex items-center gap-base border border-outline-variant rounded-lg px-sm py-1">
+                                        <button className="text-primary" onClick={() => updateQty(item.product.id, -1)}>
+                                            <span className="material-symbols-outlined text-[16px]">remove</span>
+                                        </button>
+                                        <span className="text-label-md font-label w-6 text-center">{item.quantity}</span>
+                                        <button className="text-primary" onClick={() => updateQty(item.product.id, 1)}>
+                                            <span className="material-symbols-outlined text-[16px]">add</span>
+                                        </button>
+                                    </div>
+                                    <span className="text-label-lg font-label font-semibold text-on-surface">₹{(item.product.price * item.quantity).toLocaleString()}</span>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                {cart.length > 0 && (
+                    <div className="p-xl bg-surface-container-low border-t border-outline-variant flex flex-col gap-lg">
+                        <div className="flex flex-col gap-base">
+                            <div className="flex justify-between text-on-surface-variant">
+                                <span className="text-body-md">Subtotal</span>
+                                <span className="text-body-md">₹{cartTotal.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between text-on-surface-variant">
+                                <span className="text-body-md">Logistics Fee</span>
+                                <span className="text-body-md">₹{logisticsFee}</span>
+                            </div>
+                            <div className="flex justify-between font-semibold text-on-surface pt-base border-t border-outline-variant">
+                                <span className="font-headline text-headline-sm">Total Amount</span>
+                                <span className="font-headline text-headline-sm">₹{(cartTotal + logisticsFee).toLocaleString()}</span>
+                            </div>
+                        </div>
+                        <button
+                            onClick={placeOrder}
+                            className="w-full bg-tertiary-container text-on-tertiary-container py-md rounded-xl text-label-lg font-label font-semibold flex items-center justify-center gap-md hover:bg-tertiary/20 hover:text-tertiary transition-all active:scale-[0.98]"
+                        >
+                            <span className="material-symbols-outlined">verified</span>
+                            Place Order
+                        </button>
                     </div>
                 )}
             </div>

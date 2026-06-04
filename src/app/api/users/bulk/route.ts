@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
-import { getAuthUser, hashPassword } from '@/lib/auth';
+import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { getAuthUser } from '@/lib/auth';
 import * as XLSX from 'xlsx';
 
 interface ParsedCustomer {
@@ -28,26 +28,20 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Agency selection is required' }, { status: 400 });
         }
 
-        const parsedAgencyId = parseInt(agencyId);
-
-        // Read the Excel file
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
 
-        // Convert to array of arrays (raw rows)
         const rawRows: (string | number | null | undefined)[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
         const customers: ParsedCustomer[] = [];
         let skippedRows = 0;
         let headerRowIndex = -1;
 
-        // Find the header row by looking for "name" or "address" or "mobile" in columns
         for (let i = 0; i < Math.min(rawRows.length, 5); i++) {
             const row = rawRows[i];
             if (!row) continue;
-            
             const rowStr = row.map(cell => String(cell || '').toLowerCase()).join(' ');
             if (rowStr.includes('name') || rowStr.includes('mobile') || rowStr.includes('address')) {
                 headerRowIndex = i;
@@ -78,30 +72,21 @@ export async function POST(request: NextRequest) {
             if (!row || row.length === 0) continue;
 
             const name = String(row[colName] || '').trim();
-            // If there's no name, it might be an empty row
             if (!name) continue;
 
-            // Check if it's a category separator like "CUSTOMERS" or "SUNDRY DEBTORS"
-            // Category headers usually don't have an address or phone in this format
             const address = String(row[colAddress] || '').trim();
             const mobile = String(row[colMobile] || '').trim();
             const telephone = String(row[colTelephone] || '').trim();
             const email = String(row[colEmail] || '').trim();
 
             if (!address && !mobile && !telephone && !email) {
-                // Probably a category header
-                continue;
+                continue; // Probably a category header
             }
 
             const phone = mobile || telephone || '';
             const finalEmail = email || `customer_${Date.now()}_${Math.floor(Math.random() * 10000)}@dummy.fmcg.com`;
 
-            customers.push({
-                name,
-                address,
-                phone,
-                email: finalEmail
-            });
+            customers.push({ name, address, phone, email: finalEmail });
         }
 
         if (customers.length === 0) {
@@ -111,25 +96,42 @@ export async function POST(request: NextRequest) {
             }, { status: 400 });
         }
 
-        // Bulk create customers
-        const defaultPassword = await hashPassword('password123'); // Give them a default generic password
+        const defaultPassword = 'password123';
+        let imported = 0;
 
-        const created = await prisma.user.createMany({
-            data: customers.map((c) => ({
-                agencyId: parsedAgencyId,
-                role: 'CUSTOMER',
-                name: c.name,
-                email: c.email,
-                phone: c.phone || null,
-                address: c.address || null,
-                password: defaultPassword,
-            })),
-            skipDuplicates: true, // If by any chance an email is duplicate within agency
-        });
+        // Iterate sequentially or chunked to avoid hitting Firebase Auth rate limits
+        for (const c of customers) {
+            try {
+                const userRecord = await adminAuth.createUser({
+                    email: c.email,
+                    password: defaultPassword,
+                    displayName: c.name,
+                });
+
+                await adminAuth.setCustomUserClaims(userRecord.uid, { role: 'CUSTOMER', agencyId: String(agencyId) });
+
+                await adminDb.collection('users').doc(userRecord.uid).set({
+                    agencyId: String(agencyId),
+                    role: 'CUSTOMER',
+                    name: c.name,
+                    email: c.email,
+                    phone: c.phone || null,
+                    address: c.address || null,
+                    createdAt: new Date().toISOString()
+                });
+                imported++;
+            } catch (err: any) {
+                if (err.code === 'auth/email-already-exists') {
+                    skippedRows++;
+                } else {
+                    console.error('Error importing customer', c.email, err);
+                }
+            }
+        }
 
         return NextResponse.json({
             success: true,
-            imported: created.count,
+            imported,
             total: customers.length,
             skippedRows
         });

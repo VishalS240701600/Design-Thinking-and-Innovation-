@@ -1,38 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { adminDb } from '@/lib/firebase-admin';
 import { getAuthUser } from '@/lib/auth';
 
-// GET payments — admin gets all, employee gets their own
 export async function GET(request: NextRequest) {
     const user = await getAuthUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    let where: Record<string, unknown> = user.role === 'ADMIN' ? {} : { agencyId: user.agencyId };
-
-    // CUSTOMER payment viewing (futureproofing, though normally EMP/ADMIN only)
-    // if (user.role === 'CUSTOMER') ...
-    // EMPLOYEE sees their own collected payments unless they need to see agency
-    if (user.role === 'EMPLOYEE') where.employeeId = user.id;
-
     const { searchParams } = new URL(request.url);
     const orderId = searchParams.get('orderId');
-    if (orderId) where.orderId = parseInt(orderId);
 
-    const payments = await prisma.payment.findMany({
-        where,
-        include: {
-            order: { select: { id: true, totalAmount: true, customer: { select: { name: true } } } },
-            employee: { select: { id: true, name: true } },
-            ...(user.role === 'ADMIN' ? { agency: { select: { name: true } } } : {})
-        },
-        orderBy: { paymentDate: 'desc' },
-    });
+    let paymentsQuery: FirebaseFirestore.Query = adminDb.collection('payments');
+
+    if (user.role !== 'ADMIN') paymentsQuery = paymentsQuery.where('agencyId', '==', user.agencyId);
+    if (user.role === 'EMPLOYEE') paymentsQuery = paymentsQuery.where('employeeId', '==', user.id);
+    if (orderId) paymentsQuery = paymentsQuery.where('orderId', '==', orderId);
+
+    const snapshot = await paymentsQuery.orderBy('paymentDate', 'desc').get();
+    let payments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    if (user.role === 'ADMIN') {
+        const agenciesSnapshot = await adminDb.collection('agencies').get();
+        const agenciesMap = new Map();
+        agenciesSnapshot.forEach(doc => agenciesMap.set(doc.id, doc.data()));
+
+        payments = payments.map(p => ({
+            ...p,
+            agency: { name: agenciesMap.get((p as any).agencyId)?.name || 'Unknown' }
+        }));
+    }
 
     return NextResponse.json(payments);
 }
 
-// POST payment (employee only)
-// Supports overpayment spillover: excess is applied to the customer's next unpaid orders
 export async function POST(request: NextRequest) {
     const user = await getAuthUser();
     if (!user || (user.role !== 'EMPLOYEE' && user.role !== 'ADMIN')) {
@@ -46,77 +45,72 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Order ID and amount are required' }, { status: 400 });
     }
 
-    const parsedOrderId = parseInt(orderId);
     const parsedAmount = parseFloat(amount);
-
     if (parsedAmount <= 0) {
         return NextResponse.json({ error: 'Payment amount must be greater than 0' }, { status: 400 });
     }
 
-    // Single query: fetch the target order AND all sibling orders for the same customer
-    // This eliminates a separate round-trip for the spillover path
-    const order = await prisma.order.findUnique({
-        where: { id: parsedOrderId },
-        include: { payments: true }
-    });
+    try {
+        const result = await adminDb.runTransaction(async (t) => {
+            // Read target order
+            const orderDoc = await t.get(adminDb.collection('orders').doc(orderId));
+            if (!orderDoc.exists) throw new Error('Order not found');
+            const targetOrder = { id: orderDoc.id, ...orderDoc.data()! } as any;
 
-    if (!order || (user.role !== 'ADMIN' && order.agencyId !== user.agencyId)) {
-        return NextResponse.json({ error: 'Order not found or unauthorized' }, { status: 404 });
-    }
+            if (user.role !== 'ADMIN' && targetOrder.agencyId !== user.agencyId) {
+                throw new Error('Order unauthorized');
+            }
 
-    const totalPaid = order.payments.reduce((sum, p) => sum + p.amount, 0);
-    const remainingBalance = order.totalAmount - totalPaid;
+            // Read target order's payments to get current balance
+            const targetPaymentsSnap = await t.get(adminDb.collection('payments').where('orderId', '==', orderId));
+            const totalPaidTarget = targetPaymentsSnap.docs.reduce((sum, d) => sum + (d.data().amount || 0), 0);
+            const remainingTarget = targetOrder.totalAmount - totalPaidTarget;
 
-    // If payment fits within this order, handle simply (fast path)
-    if (parsedAmount <= remainingBalance) {
-        // Use a transaction to create payment + update status in one round-trip
-        const payment = await prisma.$transaction(async (tx) => {
-            const p = await tx.payment.create({
-                data: {
+            // Fast path: fits inside this order
+            if (parsedAmount <= remainingTarget) {
+                const newPaymentRef = adminDb.collection('payments').doc();
+                const paymentData = {
                     agencyId: user.agencyId,
-                    orderId: parsedOrderId,
+                    orderId: orderId,
                     employeeId: user.id,
                     amount: parsedAmount,
                     method: method || 'CASH',
-                    notes,
-                },
-                include: {
-                    order: { select: { totalAmount: true, customer: { select: { name: true } } } },
-                },
-            });
+                    notes: notes || null,
+                    paymentDate: new Date().toISOString(),
+                    order: { totalAmount: targetOrder.totalAmount, customer: { name: targetOrder.customer?.name } },
+                    employee: { id: user.id, name: user.name }
+                };
+                t.set(newPaymentRef, paymentData);
 
-            if (totalPaid + parsedAmount >= order.totalAmount && order.status === 'PENDING') {
-                await tx.order.update({
-                    where: { id: parsedOrderId },
-                    data: { status: 'COMPLETED' }
-                });
+                if (totalPaidTarget + parsedAmount >= targetOrder.totalAmount && targetOrder.status === 'PENDING') {
+                    t.update(orderDoc.ref, { status: 'COMPLETED' });
+                }
+
+                return [{ id: newPaymentRef.id, ...paymentData }];
             }
 
-            return p;
-        });
+            // Spillover path: fetch all unpaid orders for this customer
+            const customerOrdersSnap = await t.get(
+                adminDb.collection('orders')
+                    .where('customerId', '==', targetOrder.customerId)
+                    .where('agencyId', '==', targetOrder.agencyId)
+                    .where('status', 'in', ['PENDING']) // Simple equivalent for { not: 'COMPLETED' } if pending is the only unpaid state, else we must fetch all and filter
+            );
 
-        return NextResponse.json(payment);
-    }
+            // Fetch payments for ALL these orders inside transaction
+            // We can do this efficiently by fetching payments where orderId IN [...] 
+            // but Firestore IN supports max 10. For simplicity, fetch all payments for these orders one by one
+            const orderBalances = [];
+            for (const oDoc of customerOrdersSnap.docs) {
+                const oData = { id: oDoc.id, ...oDoc.data()! } as any;
+                // Exclude COMPLETED just in case
+                if (oData.status === 'COMPLETED') continue;
 
-    // --- Overpayment spillover: single transaction for everything ---
-    try {
-        const result = await prisma.$transaction(async (tx) => {
-            // Fetch all unpaid orders for this customer inside the transaction (shares connection)
-            const customerOrders = await tx.order.findMany({
-                where: {
-                    customerId: order.customerId,
-                    agencyId: order.agencyId,
-                    status: { not: 'COMPLETED' },
-                },
-                include: { payments: true },
-                orderBy: { createdAt: 'asc' },
-            });
+                const pSnap = await t.get(adminDb.collection('payments').where('orderId', '==', oDoc.id));
+                const paid = pSnap.docs.reduce((s, d) => s + (d.data().amount || 0), 0);
+                orderBalances.push({ order: oData, orderRef: oDoc.ref, balance: oData.totalAmount - paid });
+            }
 
-            // Calculate total outstanding and per-order balances
-            const orderBalances = customerOrders.map(o => {
-                const paid = o.payments.reduce((s, p) => s + p.amount, 0);
-                return { order: o, balance: o.totalAmount - paid };
-            });
             const totalOutstanding = orderBalances.reduce((sum, ob) => sum + ob.balance, 0);
 
             if (parsedAmount > totalOutstanding) {
@@ -125,79 +119,66 @@ export async function POST(request: NextRequest) {
 
             let remaining = parsedAmount;
             const createdPayments = [];
-            const orderUpdates: Promise<unknown>[] = [];
 
-            // Process selected order first, then the rest sorted by smallest remaining balance
-            const selectedOB = orderBalances.find(ob => ob.order.id === parsedOrderId)!;
+            // Sort logic: target order first, then by balance asc
+            const selectedOB = orderBalances.find(ob => ob.order.id === orderId);
+            if (!selectedOB) throw new Error('Target order not found in unpaid list (maybe already paid)');
+
             const othersSorted = orderBalances
-                .filter(ob => ob.order.id !== parsedOrderId)
+                .filter(ob => ob.order.id !== orderId)
                 .sort((a, b) => a.balance - b.balance);
-            const sortedOrders = [
-                selectedOB.order,
-                ...othersSorted.map(ob => ob.order),
-            ];
+            
+            const sortedOrders = [selectedOB, ...othersSorted];
 
-            for (const o of sortedOrders) {
+            for (const ob of sortedOrders) {
                 if (remaining <= 0) break;
+                if (ob.balance <= 0) continue;
 
-                const paid = o.payments.reduce((s, p) => s + p.amount, 0);
-                const balance = o.totalAmount - paid;
-                if (balance <= 0) continue;
-
-                const applyAmount = Math.min(remaining, balance);
+                const applyAmount = Math.min(remaining, ob.balance);
                 remaining = parseFloat((remaining - applyAmount).toFixed(2));
 
-                // Fire payment create (don't await yet for parallelism within transaction)
-                const paymentPromise = tx.payment.create({
-                    data: {
-                        agencyId: user.agencyId,
-                        orderId: o.id,
-                        employeeId: user.id,
-                        amount: applyAmount,
-                        method: method || 'CASH',
-                        notes: notes
-                            ? `${notes} (auto-distributed)`
-                            : `Auto-distributed from payment on Order #${parsedOrderId}`,
-                    },
-                    include: {
-                        order: { select: { id: true, totalAmount: true, customer: { select: { name: true } } } },
-                    },
-                });
+                const newPaymentRef = adminDb.collection('payments').doc();
+                const paymentData = {
+                    agencyId: user.agencyId,
+                    orderId: ob.order.id,
+                    employeeId: user.id,
+                    amount: applyAmount,
+                    method: method || 'CASH',
+                    notes: notes ? `${notes} (auto-distributed)` : `Auto-distributed from payment on Order #${orderId}`,
+                    paymentDate: new Date().toISOString(),
+                    order: { totalAmount: ob.order.totalAmount, customer: { name: ob.order.customer?.name } },
+                    employee: { id: user.id, name: user.name }
+                };
+                t.set(newPaymentRef, paymentData);
+                createdPayments.push({ id: newPaymentRef.id, ...paymentData });
 
-                createdPayments.push(paymentPromise);
-
-                // Queue order completion if fully paid
-                if (paid + applyAmount >= o.totalAmount && o.status === 'PENDING') {
-                    orderUpdates.push(tx.order.update({
-                        where: { id: o.id },
-                        data: { status: 'COMPLETED' },
-                    }));
+                if (ob.balance - applyAmount <= 0 && ob.order.status === 'PENDING') {
+                    t.update(ob.orderRef, { status: 'COMPLETED' });
                 }
             }
 
-            // Await all in parallel
-            const payments = await Promise.all(createdPayments);
-            await Promise.all(orderUpdates);
-
-            return payments;
+            return createdPayments;
         });
 
-        // Return with spillover summary
+        if (result.length === 1) {
+            return NextResponse.json(result[0]);
+        }
+
         return NextResponse.json({
             ...result[0],
-            spillover: result.length > 1,
+            spillover: true,
             spilloverCount: result.length,
-            spilloverDetails: result.map(p => ({
-                orderId: p.order.id,
+            spilloverDetails: result.map((p: any) => ({
+                orderId: p.orderId,
                 amount: p.amount,
                 customerName: p.order.customer.name,
             })),
         });
-    } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (message.startsWith('VALIDATION:')) {
-            return NextResponse.json({ error: message.replace('VALIDATION:', '') }, { status: 400 });
+
+    } catch (err: any) {
+        if (err.message.startsWith('VALIDATION:')) {
+            return NextResponse.json({ error: err.message.replace('VALIDATION:', '') }, { status: 400 });
         }
-        return NextResponse.json({ error: 'Failed to process payment' }, { status: 500 });
+        return NextResponse.json({ error: err.message || 'Failed to process payment' }, { status: 500 });
     }
 }
